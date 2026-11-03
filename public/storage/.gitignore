@@ -1,0 +1,16 @@
+*.log
+/vendor
+/node_modules
+.env
+.env.backup
+.env.production
+.phpunit.result.cache
+/storage/*.key
+public/storage
+public/hot
+npm-debug.log
+yarn-error.log
+Homestead.json
+Homestead.yaml
+Thumbs.db
+.gitattributes
