@@ -503,12 +503,16 @@ export default function InventoryPage() {
                 </div>
                 
                 <div>
-                  <label className="block text-xs font-bold text-muted-foreground  capitalize tracking-wider mb-2">Product Image (Max 2MB)</label>
+                  <label className="block text-xs font-bold text-muted-foreground  capitalize tracking-wider mb-2">Product Image (Max 350KB)</label>
                   <input type="file" accept="image/png, image/jpeg, image/jpg, image/webp, image/svg+xml" 
                     onChange={async (e) => {
                       const file = e.target.files?.[0];
                       if (!file) return;
-                      if (file.size > 2 * 1024 * 1024) { toast.error('Image must be under 2MB.'); return; }
+                      if (file.size > 350000) {
+                        toast.error('Image size must not exceed 350KB.');
+                        e.target.value = '';
+                        return;
+                      }
                       
                       const toastId = toast.loading('Uploading image...');
                       try {
@@ -523,12 +527,16 @@ export default function InventoryPage() {
                           body: formData
                         });
                         
-                        if (!response.ok) throw new Error('Upload failed');
+                        if (!response.ok) {
+                          const errData = await response.json().catch(() => ({}));
+                          throw new Error(errData.message || 'Upload failed');
+                        }
                         const { url } = await response.json();
                         setForm(f => ({ ...f, image_path: url }));
                         toast.success('Image uploaded', { id: toastId });
-                      } catch (err) {
-                        toast.error('Upload failed', { id: toastId });
+                      } catch (err: any) {
+                        toast.error(err?.message || 'Upload failed', { id: toastId });
+                        e.target.value = '';
                       }
                     }}
                     className="w-full px-4 py-2 h-11 rounded-xl border border-input bg-background text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary shadow-sm transition-all file:mr-4 file:py-1 file:px-3 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-primary/10 file:text-primary hover:file:bg-primary/20" />

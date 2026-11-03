@@ -8,6 +8,7 @@ import {
 import { useApp } from '@/context/AppContext';
 import { useAdmin } from '@/context/AdminContext';
 import { useFeatureAccess } from '@/hooks/useFeatureAccess';
+import { useSystemBranding } from '@/hooks/usePlatformName';
 import { ROUTE_FEATURE_MAP } from '@/lib/features';
 import type { FeatureKey } from '@/lib/features';
 import { useState, useRef, useEffect } from 'react';
@@ -52,6 +53,7 @@ export default function DesktopSidebar({ isMobile = false }: { isMobile?: boolea
   const { currentStore, stores, setCurrentStore, user, logout, isLicenseActive } = useApp();
   const { admin, isAdminAuthenticated, logout: adminLogout } = useAdmin();
   const { hasFeature } = useFeatureAccess();
+  const { systemName, systemLogo } = useSystemBranding();
   
   const [storeDropdownOpen, setStoreDropdownOpen] = useState(false);
   const [inventoryOpen, setInventoryOpen] = useState(false);
@@ -174,12 +176,16 @@ export default function DesktopSidebar({ isMobile = false }: { isMobile?: boolea
       <aside className={`shrink-0 h-[100dvh] sticky top-0 flex flex-col bg-background z-20 ${isMobile ? 'w-full' : 'w-[280px] border-r border-border'}`}>
         
         {/* Brand Header */}
-        <div className="pt-8 pb-6 px-6 shrink-0 flex items-center gap-3 cursor-pointer" onClick={() => navigate('/dashboard')}>
-          <div className="w-10 h-10 rounded-2xl bg-primary flex items-center justify-center shadow-lg shadow-primary/20 shrink-0">
-            <Store size={20} className="text-primary-foreground" />
-          </div>
-          <div className="flex flex-col">
-            <span className="font-black text-xl tracking-tight text-foreground leading-none">Maaldhis</span>
+        <div className="pt-8 pb-6 px-6 shrink-0 flex items-center gap-3 cursor-pointer" onClick={() => navigate(isAdmin ? '/admin/dashboard' : '/dashboard')}>
+          {systemLogo ? (
+            <img src={systemLogo} alt={systemName} className="w-10 h-10 rounded-2xl object-contain bg-card border border-border p-1 shadow-sm shrink-0" />
+          ) : (
+            <div className="w-10 h-10 rounded-2xl bg-primary flex items-center justify-center shadow-lg shadow-primary/20 shrink-0">
+              <Store size={20} className="text-primary-foreground" />
+            </div>
+          )}
+          <div className="flex flex-col min-w-0">
+            <span className="font-black text-xl tracking-tight text-foreground leading-none truncate">{systemName}</span>
             <span className="text-[10px] font-bold text-primary  capitalize tracking-widest mt-1 leading-none">POS System</span>
           </div>
         </div>

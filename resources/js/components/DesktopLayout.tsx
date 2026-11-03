@@ -6,6 +6,7 @@ import { Menu, X, Store } from 'lucide-react';
 import { usePage, router } from '@inertiajs/react';
 import { ROUTE_FEATURE_MAP } from '@/lib/features';
 import { useFeatureAccess } from '@/hooks/useFeatureAccess';
+import { useSystemBranding } from '@/hooks/usePlatformName';
 
 interface DesktopLayoutProps {
   children: ReactNode;
@@ -15,6 +16,7 @@ export default function DesktopLayout({ children }: DesktopLayoutProps) {
   const { licenseStatus, storeFeatures, isLicenseActive } = useApp();
   const { url } = usePage();
   const { hasFeature } = useFeatureAccess();
+  const { systemName, systemLogo } = useSystemBranding();
   const daysRemaining = licenseStatus?.days_remaining ?? 999;
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
@@ -63,11 +65,15 @@ export default function DesktopLayout({ children }: DesktopLayoutProps) {
 
       {/* Mobile Top Bar */}
       <div className="lg:hidden flex items-center justify-between bg-card border-b border-border px-4 py-3 z-30 shrink-0 shadow-sm relative">
-        <div className="flex items-center gap-2">
-           <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center shadow-inner">
-              <Store size={14} className="text-primary-foreground" />
-           </div>
-           <div className="font-black text-lg text-foreground tracking-tight leading-none">Maaldhis</div>
+        <div className="flex items-center gap-2 min-w-0">
+           {systemLogo ? (
+             <img src={systemLogo} alt={systemName} className="w-8 h-8 rounded-lg object-contain bg-card border border-border p-0.5 shadow-sm shrink-0" />
+           ) : (
+             <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center shadow-inner shrink-0">
+                <Store size={14} className="text-primary-foreground" />
+             </div>
+           )}
+           <div className="font-black text-lg text-foreground tracking-tight leading-none truncate">{systemName}</div>
         </div>
         <button 
           onClick={() => setMobileMenuOpen(true)}

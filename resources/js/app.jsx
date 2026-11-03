@@ -12,6 +12,7 @@ import { AppProvider } from '@/context/AppContext';
 import { AdminProvider } from '@/context/AdminContext';
 import DesktopLayout from '@/components/DesktopLayout';
 import { initSubmitGuard } from '@/lib/submit-guard';
+import { getPlatformName } from '@/hooks/usePlatformName';
 
 // Initialize global double-click & duplicate submission guard
 initSubmitGuard();
@@ -31,7 +32,7 @@ if (appEl && appEl.dataset.page) {
 }
 
 createInertiaApp({
-    title: (title) => `${title} - Maaldhis`,
+    title: (title) => title ? `${title} - ${getPlatformName()}` : getPlatformName(),
     page: initialPageData,
     resolve: (name) => {
         const pages = import.meta.glob('./pages/**/*.tsx', { eager: true });

@@ -57,8 +57,9 @@ export default function StoreLogoUpload({ storeId, currentLogoUrl, storeName, on
       return;
     }
 
-    if (file.size > 150 * 1024) {
-      toast.error('Logo must be under 150KB.');
+    if (file.size > 350000) {
+      toast.error('Image size must not exceed 350KB.');
+      if (fileRef.current) fileRef.current.value = '';
       return;
     }
 
@@ -161,7 +162,7 @@ export default function StoreLogoUpload({ storeId, currentLogoUrl, storeName, on
             Remove
           </button>
         )}
-        <p className="text-[11px] text-muted-foreground">PNG, JPG, SVG · Min 100×100px · Max 150KB</p>
+        <p className="text-[11px] text-muted-foreground">PNG, JPG, SVG · Min 100×100px · Max 350KB</p>
       </div>
     </div>
   );

@@ -20,7 +20,7 @@ function logoHtml(store: Store, size: number): string {
   return `<div class="center" style="margin-bottom:6px"><img src="${escapeHtml(store.logo_url)}" alt="${escapeHtml(store.store_name)}" style="width:${size}px;height:${size}px;object-fit:contain;border-radius:8px" /></div>`;
 }
 
-const PLATFORM_FOOTER = 'Powered by Maaldhis';
+const PLATFORM_FOOTER = 'Powered by Nasri Account System';
 
 /** Generate thermal receipt HTML (58mm or 80mm) */
 export function generateThermalReceiptHTML(data: ReceiptData, width: '58mm' | '80mm' = '80mm'): string {
@@ -365,7 +365,7 @@ export function generateReceiptText(data: ReceiptData): string {
     '',
     store.receipt_thank_you_message || 'Thank you for your purchase! 🙏',
     '',
-    `— Powered by Maaldhis`,
+    `— Powered by Nasri Account System`,
   ].filter(Boolean).join('\n');
 }
 

@@ -52,6 +52,27 @@ class HandleInertiaRequests extends Middleware
             }
         }
 
+        $systemBranding = [
+            'platform_name' => config('app.name', 'Nasri Account System'),
+            'system_logo' => '',
+            'system_favicon' => '',
+        ];
+        try {
+            $rows = \App\Models\SystemSetting::whereIn('setting_key', ['platform_name', 'system_logo', 'system_favicon'])
+                ->pluck('setting_value', 'setting_key');
+            if (!empty($rows['platform_name'])) {
+                $systemBranding['platform_name'] = $rows['platform_name'];
+            }
+            if (!empty($rows['system_logo'])) {
+                $systemBranding['system_logo'] = $rows['system_logo'];
+            }
+            if (!empty($rows['system_favicon'])) {
+                $systemBranding['system_favicon'] = $rows['system_favicon'];
+            }
+        } catch (\Exception $e) {
+            // Fallback to default config values if table not ready
+        }
+
         return [
             ...parent::share($request),
             'auth' => [
@@ -60,6 +81,7 @@ class HandleInertiaRequests extends Middleware
                     'assigned_store_id' => $assigned_store_id
                 ]) : null,
             ],
+            'systemBranding' => $systemBranding,
             'flash' => [
                 'message' => fn () => $request->session()->get('message'),
                 'error' => fn () => $request->session()->get('error'),

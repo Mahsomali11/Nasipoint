@@ -1,7 +1,9 @@
 import { Store as StoreIcon } from 'lucide-react';
 import { useForm, Head, Link } from '@inertiajs/react';
+import { useSystemBranding } from '@/hooks/usePlatformName';
 
 export default function LoginPage() {
+  const { systemName, systemLogo } = useSystemBranding();
   const { data, setData, post, processing, errors } = useForm({
     email: '',
     password: '',
@@ -22,8 +24,15 @@ export default function LoginPage() {
         <div className="w-full max-w-[420px] space-y-8">
           
           <div className="flex flex-col items-start mb-8">
-            <div className="w-12 h-12 rounded-lg bg-primary/10 flex items-center justify-center mb-6">
-               <StoreIcon size={24} className="text-primary" />
+            <div className="flex items-center gap-3 mb-6">
+              {systemLogo ? (
+                <img src={systemLogo} alt={systemName} className="w-12 h-12 rounded-lg object-contain bg-card border border-border p-1 shadow-sm" />
+              ) : (
+                <div className="w-12 h-12 rounded-lg bg-primary/10 flex items-center justify-center">
+                   <StoreIcon size={24} className="text-primary" />
+                </div>
+              )}
+              <span className="font-bold text-lg text-foreground tracking-tight">{systemName}</span>
             </div>
             <h1 className="text-3xl font-light text-foreground tracking-tight capitalize">Welcome <span className="font-semibold">Back</span></h1>
             <p className="text-sm text-muted-foreground mt-2">Sign in to your point of sale system.</p>

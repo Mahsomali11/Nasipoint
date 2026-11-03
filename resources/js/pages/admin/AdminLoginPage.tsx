@@ -1,7 +1,9 @@
 import { Shield } from 'lucide-react';
 import { useForm, Head } from '@inertiajs/react';
+import { useSystemBranding } from '@/hooks/usePlatformName';
 
 export default function AdminLoginPage() {
+  const { systemName, systemLogo } = useSystemBranding();
   const { data, setData, post, processing, errors } = useForm({
     email: '',
     password: '',
@@ -17,10 +19,15 @@ export default function AdminLoginPage() {
       <Head title="System Admin Login" />
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
-          <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-[hsl(145,63%,42%)] to-[hsl(180,60%,40%)] flex items-center justify-center mx-auto mb-4 shadow-lg" style={{boxShadow: '0 8px 32px hsl(145,63%,42%,0.3)'}}>
-            <Shield size={32} className="text-foreground" />
-          </div>
-                    <p className="text-muted-foreground text-sm mt-1">Platform Administration Portal</p>
+          {systemLogo ? (
+            <img src={systemLogo} alt={systemName} className="w-16 h-16 rounded-2xl object-contain bg-card border border-border p-1.5 mx-auto mb-4 shadow-lg" />
+          ) : (
+            <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-[hsl(145,63%,42%)] to-[hsl(180,60%,40%)] flex items-center justify-center mx-auto mb-4 shadow-lg" style={{boxShadow: '0 8px 32px hsl(145,63%,42%,0.3)'}}>
+              <Shield size={32} className="text-foreground" />
+            </div>
+          )}
+          <h1 className="text-xl font-bold text-foreground tracking-tight">{systemName}</h1>
+          <p className="text-muted-foreground text-sm mt-1">Platform Administration Portal</p>
           <p className="text-muted-foreground text-xs mt-1">For platform administrators only</p>
         </div>
 

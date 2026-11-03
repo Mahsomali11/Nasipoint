@@ -18,7 +18,7 @@ const faqs = [
     icon: <BookOpen size={20} />,
     questions: [
       { q: 'How do I process a sale?', a: 'Tap "START SALE" on the Dashboard. Search or scan items, add them to the cart, then tap Checkout. Choose the sale type (Cash/Credit/Mixed), payment method, and tap "Complete Sale".' },
-      { q: 'What payment methods are supported?', a: 'Maaldhis supports Cash, M-Pesa (digital wallet), and Card payments. You can configure available payment methods in Preferences.' },
+      { q: 'What payment methods are supported?', a: 'Nasri Account System supports Cash, M-Pesa (digital wallet), and Card payments. You can configure available payment methods in Preferences.' },
       { q: 'How do credit sales work?', a: 'Choose "Credit" or "Mixed" as the sale type during checkout. Select the customer and enter any amount paid now. The remaining balance is recorded as customer debt and can be collected later.' },
       { q: 'How do I collect customer payments?', a: 'Go to Credit Record → Customers Debt. Find the customer and tap to collect payment. Enter the amount and payment method. The debt balance updates automatically.' },
       { q: 'Can I void or cancel a sale?', a: 'Currently, you can process returns for completed sales. Go to Returns, search by receipt ID, and select items to return. The inventory and reports will be updated accordingly.' },
@@ -176,8 +176,8 @@ export default function HelpPage() {
                  <Globe size={28} className="text-muted-foreground" />
               </div>
               <div>
-                 <h4 className="text-lg font-black text-foreground capitalize">Maaldhis POS</h4>
-                 <p className="text-sm font-medium text-muted-foreground">Version 1.0.0 • © {new Date().getFullYear()} Maaldhis</p>
+                 <h4 className="text-lg font-black text-foreground capitalize">Nasri Account System</h4>
+                 <p className="text-sm font-medium text-muted-foreground">Version 1.0.0 • © {new Date().getFullYear()} Nasri Account System</p>
               </div>
            </div>
            

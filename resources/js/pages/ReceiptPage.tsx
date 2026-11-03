@@ -241,7 +241,7 @@ export default function ReceiptPage({ saleId }: { saleId?: string }) {
           {currentStore?.receipt_footer_text && (
             <p className="text-center text-xs text-muted-foreground">{currentStore.receipt_footer_text}</p>
           )}
-          <p className="text-center text-[10px] font-bold capitalize tracking-widest text-muted-foreground/40  mt-4">Powered by Maaldhis</p>
+          <p className="text-center text-[10px] font-bold capitalize tracking-widest text-muted-foreground/40  mt-4">Powered by Nasri Account System</p>
         </div>
         </div>
 

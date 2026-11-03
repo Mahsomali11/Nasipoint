@@ -145,7 +145,7 @@ const topics = [
   {
     title: 'App Settings & Preferences',
     icon: Settings,
-    description: 'Customize Maaldhis for your business.',
+    description: 'Customize Nasri Account System for your business.',
     steps: [
       'Open the side menu and tap Preferences.',
       'Available settings include:',
@@ -175,7 +175,7 @@ export default function LearningCenterPage() {
            <div className="w-16 h-16 rounded-3xl bg-primary/10 flex items-center justify-center mx-auto mb-6 text-primary border border-primary/20">
               <BookOpen size={32} />
            </div>
-           <h1 className="text-3xl md:text-4xl font-black tracking-tight text-foreground capitalize">Master Maaldhis</h1>
+           <h1 className="text-3xl md:text-4xl font-black tracking-tight text-foreground capitalize">Master Nasri Account System</h1>
            <p className="text-base text-muted-foreground font-medium">Explore step-by-step guides and tutorials to get the most out of your POS system.</p>
         </div>
 

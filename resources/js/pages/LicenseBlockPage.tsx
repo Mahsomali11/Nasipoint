@@ -9,7 +9,7 @@ export default function LicenseBlockPage() {
   const statusMessages: Record<string, { title: string; message: string; color: string; bg: string }> = {
     expired: {
       title: 'License Expired',
-      message: 'Your license has expired. Renew your subscription to continue using Maaldhis.',
+      message: 'Your license has expired. Renew your subscription to continue using Nasri Account System.',
       color: 'hsl(35,90%,50%)',
       bg: 'hsl(35,90%,50%, 0.1)',
     },

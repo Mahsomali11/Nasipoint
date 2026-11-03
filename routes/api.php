@@ -18,6 +18,25 @@ Route::post('/signup', [AuthController::class, 'signup']);
 Route::post('/auth/v1/signup-with-store', [AuthController::class, 'signupWithStore']);
 Route::post('/auth/v1/logout', [AuthController::class, 'logout'])->middleware('auth:sanctum');
 
+// Public endpoint to retrieve system-wide branding (name, logo, favicon)
+Route::get('/system-branding', function () {
+    try {
+        $rows = \App\Models\SystemSetting::whereIn('setting_key', ['platform_name', 'system_logo', 'system_favicon'])
+            ->pluck('setting_value', 'setting_key');
+        return response()->json([
+            'platform_name' => !empty($rows['platform_name']) ? $rows['platform_name'] : config('app.name', 'Nasri Account System'),
+            'system_logo' => $rows['system_logo'] ?? '',
+            'system_favicon' => $rows['system_favicon'] ?? '',
+        ]);
+    } catch (\Exception $e) {
+        return response()->json([
+            'platform_name' => config('app.name', 'Nasri Account System'),
+            'system_logo' => '',
+            'system_favicon' => '',
+        ]);
+    }
+});
+
 // ============================================================
 // AUTHENTICATED USER API ROUTES
 // ============================================================
@@ -132,18 +151,37 @@ Route::middleware(['auth:sanctum'])->group(function () {
         
         Route::post('/upload-image', function (Request $request) {
             $request->validate([
-                'image' => 'required|file|mimes:jpeg,png,jpg,svg,webp|max:2048',
-                'folder' => 'required|string|in:store-logos,product-images',
+                'image' => 'required|file|max:350',
+                'folder' => 'required|string|in:store-logos,product-images,system-branding',
+            ], [
+                'image.max' => 'Image size must not exceed 350KB.',
+                'image.uploaded' => 'Image size must not exceed 350KB.',
             ]);
             
             $file = $request->file('image');
+            if ($file->getSize() > 350000) {
+                return response()->json([
+                    'message' => 'Image size must not exceed 350KB.',
+                    'errors' => ['image' => ['Image size must not exceed 350KB.']],
+                ], 422);
+            }
+
+            $ext = strtolower($file->getClientOriginalExtension());
+            if (!in_array($ext, ['jpeg', 'png', 'jpg', 'svg', 'webp', 'ico'])) {
+                return response()->json(['message' => 'Only PNG, JPG, JPEG, WEBP, SVG, or ICO files are allowed.'], 422);
+            }
+
             $folder = $request->input('folder');
             
             // Create a unique filename
-            $filename = uniqid() . '_' . time() . '.' . $file->getClientOriginalExtension();
+            $filename = uniqid() . '_' . time() . '.' . $ext;
             
             // Move directly to public/uploads folder to avoid storage symlink issues on shared hosting
-            $file->move(public_path('uploads/' . $folder), $filename);
+            $targetDir = public_path('uploads/' . $folder);
+            if (!is_dir($targetDir)) {
+                mkdir($targetDir, 0755, true);
+            }
+            $file->move($targetDir, $filename);
             
             // Use relative path for URL so it works regardless of APP_URL config
             $path = 'uploads/' . $folder . '/' . $filename;
@@ -151,6 +189,41 @@ Route::middleware(['auth:sanctum'])->group(function () {
             return response()->json([
                 'path' => $path,
                 'url' => '/' . $path
+            ]);
+        });
+
+        Route::post('/system-branding', function (Request $request) {
+            $descriptions = [
+                'platform_name' => 'Official system name displayed across headers, sidebars, and titles',
+                'system_logo' => 'System logo URL displayed on the sidebar and header',
+                'system_favicon' => 'Web icon (favicon) URL displayed in the browser tab',
+            ];
+
+            foreach (['platform_name', 'system_logo', 'system_favicon'] as $key) {
+                if ($request->has($key)) {
+                    $existing = \App\Models\SystemSetting::where('setting_key', $key)->first();
+                    if ($existing) {
+                        $existing->update([
+                            'setting_value' => (string) ($request->input($key) ?? ''),
+                        ]);
+                    } else {
+                        \App\Models\SystemSetting::create([
+                            'id' => (string) \Illuminate\Support\Str::uuid(),
+                            'setting_key' => $key,
+                            'setting_value' => (string) ($request->input($key) ?? ''),
+                            'description' => $descriptions[$key],
+                        ]);
+                    }
+                }
+            }
+
+            $rows = \App\Models\SystemSetting::whereIn('setting_key', ['platform_name', 'system_logo', 'system_favicon'])
+                ->pluck('setting_value', 'setting_key');
+
+            return response()->json([
+                'platform_name' => !empty($rows['platform_name']) ? $rows['platform_name'] : config('app.name', 'Nasri Account System'),
+                'system_logo' => $rows['system_logo'] ?? '',
+                'system_favicon' => $rows['system_favicon'] ?? '',
             ]);
         });
     });
