@@ -18,6 +18,12 @@ class Sale extends Model
     ];
 
     public function stores() { return $this->belongsTo(Store::class, 'store_id'); }
+    public function items() { return $this->hasMany(SaleItem::class, 'sale_id'); }
+    public function customer() { return $this->belongsTo(Customer::class, 'customer_id'); }
+    public function cashier() { return $this->belongsTo(User::class, 'staff_user_id'); }
+    public function debt() { return $this->hasOne(CustomerDebt::class, 'sale_id')->withoutGlobalScopes(); }
+    public function payments() { return $this->hasMany(Payment::class, 'sale_id')->withoutGlobalScopes(); }
+    public function paymentAccount() { return $this->belongsTo(PaymentAccount::class, 'payment_account_id'); }
 
     protected static function booted()
     {

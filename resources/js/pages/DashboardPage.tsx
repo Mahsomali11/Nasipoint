@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { router, usePage } from '@inertiajs/react';
 import { ShoppingCart, Receipt, TrendingUp, CreditCard, Package, Clock, MapPin, Wallet, ArrowUpRight, ArrowDownRight, Store, Plus, Bell, ChevronRight, Activity, Calendar } from 'lucide-react';
 import { useApp } from '@/context/AppContext';
@@ -13,34 +13,41 @@ export default function DashboardPage() {
   const userRole = user?.role || 'owner';
   const { hasFeature } = useFeatureAccess();
 
-  const recentSales = [...sales]
-    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-    .slice(0, 10)
-    .map(sale => {
-      const customer = customers?.find(c => c.id === sale.customer_id);
-      const payment = payments?.find(p => p.sale_id === sale.id);
-      return {
-        ...sale,
-        customer_name: customer ? customer.name : 'Walk-in Customer',
-        payment_method: payment ? (payment.method || 'Cash') : 'Cash'
-      };
-    });
+  const recentSales = useMemo(() => {
+    const customerMap = new Map(customers?.map(c => [c.id, c]) || []);
+    const paymentBySaleMap = new Map(payments?.map(p => [p.sale_id, p]) || []);
+    return [...sales]
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+      .slice(0, 10)
+      .map(sale => {
+        const customer = sale.customer_id ? customerMap.get(sale.customer_id) : undefined;
+        const payment = paymentBySaleMap.get(sale.id);
+        return {
+          ...sale,
+          customer_name: customer ? customer.name : 'Walk-in Customer',
+          payment_method: payment ? (payment.method || 'Cash') : 'Cash'
+        };
+      });
+  }, [sales, customers, payments]);
 
-  const totalStock = items.reduce((sum, i) => sum + i.quantity, 0);
-  const lowStockItems = items.filter(i => i.type === 'product' && i.quantity > 0 && i.quantity <= i.low_stock_threshold);
-  const outOfStockItems = items.filter(i => i.type === 'product' && i.quantity === 0);
-  const lowStockCount = lowStockItems.length + outOfStockItems.length;
+  const { lowStockItems, outOfStockItems, lowStockCount } = useMemo(() => {
+    const low = items.filter(i => i.type === 'product' && i.quantity > 0 && i.quantity <= i.low_stock_threshold);
+    const out = items.filter(i => i.type === 'product' && i.quantity === 0);
+    return { lowStockItems: low, outOfStockItems: out, lowStockCount: low.length + out.length };
+  }, [items]);
+
   const hasInventoryFeature = hasFeature('inventory');
-  
-  const todaySales = sales.filter(s => {
-    const d = new Date(s.sold_at);
-    const now = new Date();
-    return d.toDateString() === now.toDateString();
-  });
-  
-  const todayRevenue = todaySales.reduce((sum, s) => sum + s.total, 0);
-  const openDebts = customerDebts.filter(d => d.status !== 'paid').reduce((sum, d) => sum + d.balance_amount, 0);
-  const todayExpenses = expenses.filter(e => e.status !== 'reversed' && new Date(e.created_at).toDateString() === new Date().toDateString() && e.expense_type !== 'Purchase' && e.expense_type !== 'Supplier Payment').reduce((sum, e) => sum + e.amount, 0);
+
+  const { todaySales, todayRevenue, openDebts, todayExpenses } = useMemo(() => {
+    const todayStr = new Date().toDateString();
+    const tSales = sales.filter(s => new Date(s.sold_at).toDateString() === todayStr);
+    const tRev = tSales.reduce((sum, s) => sum + s.total, 0);
+    const oDebts = customerDebts.filter(d => d.status !== 'paid').reduce((sum, d) => sum + d.balance_amount, 0);
+    const tExp = expenses
+      .filter(e => e.status !== 'reversed' && new Date(e.created_at).toDateString() === todayStr && e.expense_type !== 'Purchase' && e.expense_type !== 'Supplier Payment')
+      .reduce((sum, e) => sum + e.amount, 0);
+    return { todaySales: tSales, todayRevenue: tRev, openDebts: oDebts, todayExpenses: tExp };
+  }, [sales, customerDebts, expenses]);
 
   const startSale = () => {
     if (!hasFeature('pos_sales')) {
@@ -94,22 +101,22 @@ export default function DashboardPage() {
       </div>
 
       <div className="p-6 md:px-8 max-w-7xl mx-auto w-full space-y-8">
-        
+
         <TrialExpiryBanner />
         <OnboardingCards />
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-          
+
           {/* Main Left Column */}
           <div className="lg:col-span-8 space-y-8">
-            
+
             {/* Primary Metrics Grid - Restructured */}
             <div>
               <h2 className="text-sm font-bold text-foreground  capitalize tracking-wider mb-4 flex items-center gap-2">
                 <Activity size={16} className="text-muted-foreground" />
                 Today's Performance
               </h2>
-              
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {/* Hero Revenue Card */}
                 <div className="bg-primary text-primary-foreground rounded-md p-6 border border-primary shadow-sm flex flex-col justify-between relative overflow-hidden sm:col-span-2 md:col-span-1">
@@ -229,7 +236,7 @@ export default function DashboardPage() {
 
           {/* Right Sidebar Column */}
           <div className="lg:col-span-4 space-y-8">
-            
+
             {/* Store Badge Component */}
             <div className="bg-background rounded-md border border-border shadow-sm p-6 flex items-center gap-5">
               <div className="shrink-0">
@@ -269,7 +276,7 @@ export default function DashboardPage() {
                   </span>
                 )}
               </div>
-              
+
               <div className="p-5 flex items-center justify-between bg-muted/10 border-b border-border">
                 <div>
                   <p className="text-xs font-bold text-muted-foreground  capitalize tracking-wider">Total Inventory</p>

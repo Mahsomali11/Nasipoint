@@ -79,28 +79,37 @@ class PurchaseController extends Controller
                 'notes' => $request->notes,
             ]);
 
+            $now = now()->format('Y-m-d H:i:s');
+            $bulkPurchaseItems = [];
+            $itemIds = array_values(array_unique(array_column($itemsData, 'item_id')));
+            $inventoryMap = $request->status === 'completed'
+                ? Item::whereIn('id', $itemIds)->get()->keyBy('id')
+                : collect();
+
             foreach ($itemsData as $itemData) {
                 $purchaseItemPayload = $itemData;
                 unset($purchaseItemPayload['sell_price']);
                 $purchaseItemPayload['purchase_id'] = $purchase->id;
-                PurchaseItem::create($purchaseItemPayload);
+                $purchaseItemPayload['created_at'] = $now;
+                $purchaseItemPayload['updated_at'] = $now;
+                $bulkPurchaseItems[] = $purchaseItemPayload;
 
                 if ($request->status === 'completed') {
-                    $inventoryItem = Item::find($itemData['item_id']);
+                    $inventoryItem = $inventoryMap->get($itemData['item_id']);
                     if ($inventoryItem) {
-                            $existingQty = $inventoryItem->quantity ?? 0;
-                            $existingCost = $inventoryItem->cost_price ?? 0;
-                            $newQty = $itemData['quantity'];
-                            $newCost = $itemData['cost_price'];
-                            
-                            $totalQty = $existingQty + $newQty;
-                            
-                            if ($totalQty > 0) {
-                                $weightedCost = (($existingQty * $existingCost) + ($newQty * $newCost)) / $totalQty;
-                                $inventoryItem->cost_price = round($weightedCost, 2);
-                            } else {
-                                $inventoryItem->cost_price = $newCost;
-                            }
+                        $existingQty = $inventoryItem->quantity ?? 0;
+                        $existingCost = $inventoryItem->cost_price ?? 0;
+                        $newQty = $itemData['quantity'];
+                        $newCost = $itemData['cost_price'];
+                        
+                        $totalQty = $existingQty + $newQty;
+                        
+                        if ($totalQty > 0) {
+                            $weightedCost = (($existingQty * $existingCost) + ($newQty * $newCost)) / $totalQty;
+                            $inventoryItem->cost_price = round($weightedCost, 2);
+                        } else {
+                            $inventoryItem->cost_price = $newCost;
+                        }
                         
                         if (isset($itemData['sell_price']) && is_numeric($itemData['sell_price'])) {
                             $inventoryItem->sell_price = $itemData['sell_price'];
@@ -110,6 +119,10 @@ class PurchaseController extends Controller
                         $inventoryItem->save();
                     }
                 }
+            }
+
+            if (!empty($bulkPurchaseItems)) {
+                PurchaseItem::insert($bulkPurchaseItems);
             }
 
             // Financial & Cash Flow Integration (Accounting Balance)

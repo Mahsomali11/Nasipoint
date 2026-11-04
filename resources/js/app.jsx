@@ -31,30 +31,31 @@ if (appEl && appEl.dataset.page) {
     }
 }
 
+const pages = import.meta.glob('./pages/**/*.tsx');
+
 createInertiaApp({
     title: (title) => title ? `${title} - ${getPlatformName()}` : getPlatformName(),
     page: initialPageData,
-    resolve: (name) => {
-        const pages = import.meta.glob('./pages/**/*.tsx', { eager: true });
-        let page = pages[`./pages/${name}.tsx`];
-        if (!page) {
+    resolve: async (name) => {
+        const importPage = pages[`./pages/${name}.tsx`];
+        if (!importPage) {
             console.error(`Page not found: ./pages/${name}.tsx`);
             return;
         }
-        
+
+        const page = await importPage();
+
         // If it has a default export
         if (page.default) {
             // Apply Layouts
-            const isAdmin = name.startsWith('admin/');
-            
-            if (!name.startsWith('LoginPage') && 
-                !name.startsWith('SignupPage') && 
+            if (!name.startsWith('LoginPage') &&
+                !name.startsWith('SignupPage') &&
                 !name.startsWith('ResetPasswordPage') &&
                 !name.startsWith('CustomerDisplayPage') &&
                 !name.startsWith('admin/AdminLoginPage') &&
-                !name.startsWith('NotFound') && 
+                !name.startsWith('NotFound') &&
                 !page.default.layout) {
-                
+
                 page.default.layout = (pageElement) => <DesktopLayout>{pageElement}</DesktopLayout>;
             }
         }

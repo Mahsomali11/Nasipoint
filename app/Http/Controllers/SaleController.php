@@ -28,8 +28,19 @@ class SaleController extends Controller
         // Clean target
         $target = trim($target);
 
+        $eagerRelations = [
+            'items.item:id,name',
+            'customer',
+            'stores',
+            'cashier:id,name,full_name,email',
+            'debt',
+            'payments' => fn ($q) => $q->orderBy('created_at', 'asc'),
+            'paymentAccount',
+        ];
+
         // 1. Direct match on sales table by ID or receipt_no
         $sale = Sale::withoutGlobalScopes()
+            ->with($eagerRelations)
             ->where(function ($q) use ($target) {
                 $q->where('id', $target)
                   ->orWhere('receipt_no', $target);
@@ -45,13 +56,14 @@ class SaleController extends Controller
                 ->first();
 
             if ($debt && !empty($debt->sale_id)) {
-                $sale = Sale::withoutGlobalScopes()->where('id', $debt->sale_id)->first();
+                $sale = Sale::withoutGlobalScopes()->with($eagerRelations)->where('id', $debt->sale_id)->first();
             }
         }
 
         // 3. Fallback: fuzzy search receipt_no (e.g. if partial number or stripped prefix)
         if (!$sale) {
             $sale = Sale::withoutGlobalScopes()
+                ->with($eagerRelations)
                 ->where('receipt_no', 'like', "%{$target}%")
                 ->first();
         }
@@ -63,31 +75,24 @@ class SaleController extends Controller
             ], 404);
         }
 
-        // Check user access to this store
+        // Check user access to this store using cached access
         $user = $request->user();
         if ($user) {
-            $isAdmin = DB::table('admin_roles')->where('user_id', $user->id)->where('is_active', true)->exists();
-            $isOwner = DB::table('stores')->where('id', $sale->store_id)->where('owner_user_id', $user->id)->exists();
-            $isStaff = DB::table('staff_accounts')->where('store_id', $sale->store_id)->where('user_id', $user->id)->where('is_active', true)->exists();
+            $access = \App\Support\AccessCache::getUserAccess($user);
+            $storeIdStr = (string) $sale->store_id;
+            $isAdmin = $access['is_admin'];
+            $isOwner = in_array($storeIdStr, $access['owned_store_ids'], true);
+            $isStaff = isset($access['staff_roles_by_store'][$storeIdStr]);
 
             if (!$isAdmin && !$isOwner && !$isStaff) {
                 return response()->json(['error' => 'Unauthorized access to this store receipt'], 403);
             }
         }
 
-        // 4. Fetch line items
-        $items = DB::table('sale_items')->where('sale_id', $sale->id)->get();
+        // 4. Format eager-loaded line items (no N+1 queries)
         $formattedItems = [];
-
-        foreach ($items as $it) {
-            $itemName = $it->item_name;
-            if (empty($itemName) && !empty($it->item_id)) {
-                $prod = DB::table('items')->where('id', $it->item_id)->first();
-                if ($prod) {
-                    $itemName = $prod->name;
-                }
-            }
-
+        foreach ($sale->items as $it) {
+            $itemName = $it->item_name ?: ($it->item?->name ?? null);
             $qty = (float)($it->quantity ?? 1);
             $sellPrice = (float)($it->sell_price ?? 0);
             $costPrice = (float)($it->cost_price ?? 0);
@@ -108,38 +113,14 @@ class SaleController extends Controller
             ];
         }
 
-        // 5. Fetch Customer details
-        $customer = null;
-        if (!empty($sale->customer_id)) {
-            $customer = DB::table('customers')->where('id', $sale->customer_id)->first();
-        }
-
-        // 6. Fetch Store details
-        $store = DB::table('stores')->where('id', $sale->store_id)->first();
-
-        // 7. Fetch Cashier details
-        $cashier = null;
-        if (!empty($sale->staff_user_id)) {
-            $cashier = DB::table('users')->where('id', $sale->staff_user_id)->select('id', 'name', 'full_name', 'email')->first();
-        }
+        // 5-9. Use eager-loaded relationships
+        $customer = $sale->customer;
+        $store = $sale->stores;
+        $cashier = $sale->cashier;
         $cashierName = $cashier ? ($cashier->full_name ?? $cashier->name) : ($user ? ($user->full_name ?? $user->name) : 'Staff');
-
-        // 8. Fetch Associated Customer Debt (if credit / split sale)
-        $debt = CustomerDebt::withoutGlobalScopes()
-            ->where('sale_id', $sale->id)
-            ->first();
-
-        // 9. Fetch Payments & Settlements
-        $payments = DB::table('payments')
-            ->where('sale_id', $sale->id)
-            ->orderBy('created_at', 'asc')
-            ->get();
-
-        // Determine payment account & method
-        $account = null;
-        if (!empty($sale->payment_account_id)) {
-            $account = DB::table('payment_accounts')->where('id', $sale->payment_account_id)->first();
-        }
+        $debt = $sale->debt;
+        $payments = $sale->payments;
+        $account = $sale->paymentAccount;
 
         $salePayment = $payments->firstWhere('payment_type', 'sale');
         if (!$account && $salePayment && !empty($salePayment->payment_account_id)) {

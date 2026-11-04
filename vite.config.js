@@ -20,4 +20,27 @@ export default defineConfig({
             '@': path.resolve(__dirname, './resources/js'),
         },
     },
+    build: {
+        chunkSizeWarningLimit: 1000,
+        rollupOptions: {
+            output: {
+                manualChunks(id) {
+                    if (id.includes('node_modules')) {
+                        if (id.includes('recharts') || id.includes('d3-')) {
+                            return 'vendor-charts';
+                        }
+                        if (id.includes('xlsx')) {
+                            return 'vendor-xlsx';
+                        }
+                        if (id.includes('html5-qrcode')) {
+                            return 'vendor-scanner';
+                        }
+                        if (id.includes('lucide-react')) {
+                            return 'vendor-icons';
+                        }
+                    }
+                },
+            },
+        },
+    },
 });

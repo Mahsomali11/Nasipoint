@@ -45,52 +45,58 @@ class CheckStoreAccess
             $requestedStoreId = substr($requestedStoreId, 3);
         }
 
-        // 2. Check if user is an owner of this store
-        $isOwner = \App\Models\Store::where('id', $requestedStoreId)
-            ->where('owner_user_id', $user->id)
-            ->exists();
-            
+        $access = \App\Support\AccessCache::getUserAccess($user);
+        $requestedStoreIdStr = (string) $requestedStoreId;
+
+        // 2. Check if user is an owner of this store (via cache, with DB fallback if store was just created)
+        $isOwner = in_array($requestedStoreIdStr, $access['owned_store_ids'], true);
+        if (!$isOwner) {
+            $isOwner = \App\Models\Store::where('id', $requestedStoreIdStr)
+                ->where('owner_user_id', $user->id)
+                ->exists();
+            if ($isOwner) {
+                \App\Support\AccessCache::clearUserAccess((string) $user->id);
+            }
+        }
+
         if ($isOwner) {
             $request->attributes->set('store_role', 'owner');
             return $next($request);
         }
 
-        // 3. Check if user is staff for this store
-        $staff = \App\Models\StaffAccount::where('user_id', $user->id)
-            ->where('store_id', $requestedStoreId)
-            ->where('is_active', true)
-            ->first();
-
-        if ($staff) {
-            $request->attributes->set('store_role', $staff->role);
-            
-            // Check basic role restrictions for the entire store
-            if (in_array($request->route('table'), ['stores', 'staff_accounts']) && $request->method() !== 'GET') {
-                if ($staff->role !== 'admin') {
-                    \Illuminate\Support\Facades\Log::warning("CheckStoreAccess 403: Role restriction. User: " . $user->id . " Role: " . $staff->role . " Table: " . $request->route('table'));
-                    return response()->json(['error' => 'Forbidden: You do not have permission to modify store settings or staff.'], 403);
+        // 3. Check if user is staff for this store (via cache, with DB fallback if staff was just invited)
+        $staffRole = $access['staff_roles_by_store'][$requestedStoreIdStr] ?? null;
+        if (!$staffRole) {
+            $staff = \App\Models\StaffAccount::where(function ($q) use ($user) {
+                $q->where('user_id', $user->id);
+                if (!empty($user->email)) {
+                    $q->orWhere('email', $user->email);
                 }
+            })
+                ->where('store_id', $requestedStoreIdStr)
+                ->where('is_active', true)
+                ->first();
+
+            if ($staff) {
+                if (empty($staff->user_id)) {
+                    $staff->update(['user_id' => $user->id]);
+                }
+                $staffRole = $staff->role;
+                \App\Support\AccessCache::clearUserAccess((string) $user->id);
             }
-            
-            return $next($request);
         }
 
-        // 4. Fallback check by email (in case user_id is missing for some reason)
-        $staffByEmail = \App\Models\StaffAccount::where('email', $user->email)
-            ->where('store_id', $requestedStoreId)
-            ->where('is_active', true)
-            ->first();
+        if ($staffRole) {
+            $request->attributes->set('store_role', $staffRole);
 
-        if ($staffByEmail) {
-            // Auto-heal the missing user_id
-            $staffByEmail->update(['user_id' => $user->id]);
-            $request->attributes->set('store_role', $staffByEmail->role);
-            
+            // Check basic role restrictions for the entire store
             if (in_array($request->route('table'), ['stores', 'staff_accounts']) && $request->method() !== 'GET') {
-                if ($staffByEmail->role !== 'admin') {
+                if ($staffRole !== 'admin') {
+                    \Illuminate\Support\Facades\Log::warning("CheckStoreAccess 403: Role restriction. User: " . $user->id . " Role: " . $staffRole . " Table: " . $request->route('table'));
                     return response()->json(['error' => 'Forbidden: You do not have permission to modify store settings or staff.'], 403);
                 }
             }
+
             return $next($request);
         }
 

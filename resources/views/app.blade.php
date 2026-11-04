@@ -5,12 +5,7 @@
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="csrf-token" content="{{ csrf_token() }}">
         @php
-            $brandingRows = [];
-            try {
-                $brandingRows = \App\Models\SystemSetting::whereIn('setting_key', ['platform_name', 'system_logo', 'system_favicon'])
-                    ->pluck('setting_value', 'setting_key')
-                    ->toArray();
-            } catch (\Exception $e) {}
+            $brandingRows = \App\Support\AccessCache::getSystemBranding();
             $systemName = !empty($brandingRows['platform_name']) ? $brandingRows['platform_name'] : config('app.name', 'Nasri Account System');
             $systemFavicon = !empty($brandingRows['system_favicon']) ? $brandingRows['system_favicon'] : '/favicon.ico';
         @endphp

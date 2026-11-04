@@ -36,50 +36,29 @@ class HandleInertiaRequests extends Middleware
     public function share(Request $request): array
     {
         $user = $request->user();
-        $role = null;
-        $assigned_store_id = null;
+        $userPayload = null;
+        $storesPayload = [];
 
         if ($user) {
-            $isOwner = \App\Models\Store::where('owner_user_id', $user->id)->exists();
-            if ($isOwner) {
-                $role = 'owner';
-            } else {
-                $staff = \App\Models\StaffAccount::where('user_id', $user->id)->orWhere('email', $user->email)->first();
-                if ($staff) {
-                    $role = $staff->role;
-                    $assigned_store_id = $staff->store_id;
-                }
-            }
+            $access = \App\Support\AccessCache::getUserAccess($user);
+            $userPayload = array_merge(
+                $user->only(['id', 'name', 'full_name', 'email', 'phone', 'created_at']),
+                [
+                    'role' => $access['role'],
+                    'admin_role' => $access['admin_role'],
+                    'assigned_store_id' => $access['assigned_store_id'],
+                ]
+            );
+            $storesPayload = $access['stores'] ?? [];
         }
 
-        $systemBranding = [
-            'platform_name' => config('app.name', 'Nasri Account System'),
-            'system_logo' => '',
-            'system_favicon' => '',
-        ];
-        try {
-            $rows = \App\Models\SystemSetting::whereIn('setting_key', ['platform_name', 'system_logo', 'system_favicon'])
-                ->pluck('setting_value', 'setting_key');
-            if (!empty($rows['platform_name'])) {
-                $systemBranding['platform_name'] = $rows['platform_name'];
-            }
-            if (!empty($rows['system_logo'])) {
-                $systemBranding['system_logo'] = $rows['system_logo'];
-            }
-            if (!empty($rows['system_favicon'])) {
-                $systemBranding['system_favicon'] = $rows['system_favicon'];
-            }
-        } catch (\Exception $e) {
-            // Fallback to default config values if table not ready
-        }
+        $systemBranding = \App\Support\AccessCache::getSystemBranding();
 
         return [
             ...parent::share($request),
             'auth' => [
-                'user' => $user ? array_merge($user->toArray(), [
-                    'role' => $role,
-                    'assigned_store_id' => $assigned_store_id
-                ]) : null,
+                'user' => $userPayload,
+                'stores' => $storesPayload,
             ],
             'systemBranding' => $systemBranding,
             'flash' => [

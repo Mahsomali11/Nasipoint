@@ -26,13 +26,9 @@ class AdminMiddleware
             return redirect()->route('admin.login');
         }
 
-        $userId = Auth::id();
-
-        // Must have an active admin_roles entry
-        $isAdmin = DB::table('admin_roles')
-            ->where('user_id', $userId)
-            ->where('is_active', true)
-            ->exists();
+        $user = Auth::user();
+        $access = $user ? \App\Support\AccessCache::getUserAccess($user) : ['is_admin' => false];
+        $isAdmin = $access['is_admin'];
 
         if (!$isAdmin) {
             Auth::logout();

@@ -1,21 +1,21 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useApp } from '@/context/AppContext';
 import { api as apiClient } from '@/api';
 import PageHeader from '@/components/PageHeader';
-import { 
-  TrendingUp, 
-  TrendingDown, 
-  DollarSign, 
-  Package, 
-  Wallet, 
-  BarChart3, 
-  CalendarDays, 
-  Activity, 
-  Receipt, 
-  X, 
-  Printer, 
-  CheckCircle2, 
-  Clock, 
+import {
+  TrendingUp,
+  TrendingDown,
+  DollarSign,
+  Package,
+  Wallet,
+  BarChart3,
+  CalendarDays,
+  Activity,
+  Receipt,
+  X,
+  Printer,
+  CheckCircle2,
+  Clock,
   ShoppingBag,
   Info,
   Layers,
@@ -55,57 +55,108 @@ export default function SalesReportPage() {
   const currentMonth = now.getMonth();
   const currentYear = now.getFullYear();
 
-  // 1. Filter Sales strictly for the current store, completed (non-voided), and matching the date range
-  const filterSales = (s: typeof sales[0]) => {
-    if (s.store_id !== currentStore?.id || s.status === 'voided') return false;
-    if (selectedAccountId !== 'all' && s.payment_account_id !== selectedAccountId) return false;
-    const dateStr = s.sold_at || s.created_at;
-    const d = new Date(dateStr);
-    if (tab === 'today') return d.toDateString() === today;
-    if (tab === 'month') return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
-    return true; // 'all'
-  };
+  // O(1) Lookup Maps to prevent quadratic O(N * M) scans across sales, items, payments, and debts
+  const saleItemsBySaleId = useMemo(() => {
+    const map = new Map<string, typeof saleItems>();
+    for (const si of saleItems) {
+      const list = map.get(si.sale_id);
+      if (list) list.push(si);
+      else map.set(si.sale_id, [si]);
+    }
+    return map;
+  }, [saleItems]);
 
-  const filteredSales = sales.filter(filterSales);
-  const filteredSaleItems = saleItems.filter(si => filteredSales.some(s => s.id === si.sale_id));
+  const paymentsBySaleId = useMemo(() => {
+    const map = new Map<string, typeof payments>();
+    for (const p of payments) {
+      if (!p.sale_id) continue;
+      const list = map.get(p.sale_id);
+      if (list) list.push(p);
+      else map.set(p.sale_id, [p]);
+    }
+    return map;
+  }, [payments]);
+
+  const debtBySaleId = useMemo(() => {
+    const map = new Map<string, typeof customerDebts[0]>();
+    for (const d of customerDebts) {
+      if (d.sale_id) map.set(d.sale_id, d);
+    }
+    return map;
+  }, [customerDebts]);
+
+  const storeItemsById = useMemo(() => {
+    const map = new Map<string, typeof storeItems[0]>();
+    for (const it of storeItems) {
+      map.set(it.id, it);
+    }
+    return map;
+  }, [storeItems]);
+
+  // 1. Filter Sales strictly for the current store, completed (non-voided), and matching the date range
+  const filteredSales = useMemo(() => {
+    return sales.filter((s) => {
+      if (s.store_id !== currentStore?.id || s.status === 'voided') return false;
+      if (selectedAccountId !== 'all' && s.payment_account_id !== selectedAccountId) return false;
+      const dateStr = s.sold_at || s.created_at;
+      const d = new Date(dateStr);
+      if (tab === 'today') return d.toDateString() === today;
+      if (tab === 'month') return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
+      return true;
+    });
+  }, [sales, currentStore?.id, selectedAccountId, tab, today, currentMonth, currentYear]);
+
+  const filteredSaleItems = useMemo(() => {
+    const result: typeof saleItems = [];
+    for (const s of filteredSales) {
+      const items = saleItemsBySaleId.get(s.id);
+      if (items) result.push(...items);
+    }
+    return result;
+  }, [filteredSales, saleItemsBySaleId]);
 
   // Filter Operating Expenses for the same period
-  const filteredExpenses = expenses.filter(e => {
-    if (e.store_id !== currentStore?.id) return false;
-    const d = new Date(e.created_at);
-    if (tab === 'today') return d.toDateString() === today;
-    if (tab === 'month') return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
-    return true;
-  });
+  const filteredExpenses = useMemo(() => {
+    return expenses.filter(e => {
+      if (e.store_id !== currentStore?.id) return false;
+      const d = new Date(e.created_at);
+      if (tab === 'today') return d.toDateString() === today;
+      if (tab === 'month') return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
+      return true;
+    });
+  }, [expenses, currentStore?.id, tab, today, currentMonth, currentYear]);
 
   // Filter Payments (Cash Flow events) for the same period
-  const filteredPayments = payments.filter(p => {
-    if (p.store_id !== currentStore?.id) return false;
-    if (selectedAccountId !== 'all' && p.payment_account_id !== selectedAccountId) return false;
-    const d = new Date(p.created_at);
-    if (tab === 'today') return d.toDateString() === today;
-    if (tab === 'month') return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
-    return true;
-  });
+  const filteredPayments = useMemo(() => {
+    return payments.filter(p => {
+      if (p.store_id !== currentStore?.id) return false;
+      if (selectedAccountId !== 'all' && p.payment_account_id !== selectedAccountId) return false;
+      const d = new Date(p.created_at);
+      if (tab === 'today') return d.toDateString() === today;
+      if (tab === 'month') return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
+      return true;
+    });
+  }, [payments, currentStore?.id, selectedAccountId, tab, today, currentMonth, currentYear]);
 
-  // Helper: Cash collected strictly at POS checkout for a sale
-  const getSaleCheckoutCash = (sale: typeof sales[0]) => {
-    const saleP = payments.find(p => p.sale_id === sale.id && p.payment_type === 'sale');
+  // Helper: Cash collected strictly at POS checkout for a sale (O(1) map lookup)
+  const getSaleCheckoutCash = useCallback((sale: typeof sales[0]) => {
+    const salePayments = paymentsBySaleId.get(sale.id) || [];
+    const saleP = salePayments.find(p => p.payment_type === 'sale');
     if (saleP) return Number(saleP.amount || 0);
 
-    const debt = customerDebts.find(d => d.sale_id === sale.id);
+    const debt = debtBySaleId.get(sale.id);
     if (debt) return Math.max(0, Number(sale.total || 0) - Number(debt.original_amount || 0));
 
     // Fallback: paid_amount minus any debt collections for this sale
-    const debtCollections = payments
-      .filter(p => p.sale_id === sale.id && p.payment_type === 'debt_collection')
+    const debtCollections = salePayments
+      .filter(p => p.payment_type === 'debt_collection')
       .reduce((s, p) => s + Number(p.amount || 0), 0);
     return Math.max(0, Number(sale.paid_amount || 0) - debtCollections);
-  };
+  }, [paymentsBySaleId, debtBySaleId]);
 
-  // Helper: Get financial breakdown for any sale (revenue excl tax, COGS, full gross profit)
-  const getSaleFinancials = (sale: typeof sales[0]) => {
-    const sItems = saleItems.filter(si => si.sale_id === sale.id);
+  // Helper: Get financial breakdown for any sale (O(1) map lookup)
+  const getSaleFinancials = useCallback((sale: typeof sales[0]) => {
+    const sItems = saleItemsBySaleId.get(sale.id) || [];
     let saleCogs = 0;
     let saleProfit = 0;
     let itemsCount = 0;
@@ -115,7 +166,7 @@ export default function SalesReportPage() {
       itemsCount += qty;
       let cost = Number(si.cost_price || 0);
       if (cost <= 0) {
-        const product = storeItems.find(it => it.id === si.item_id);
+        const product = storeItemsById.get(si.item_id);
         if (product && Number(product.cost_price) > 0) {
           cost = Number(product.cost_price);
         }
@@ -142,7 +193,7 @@ export default function SalesReportPage() {
       saleTax,
       saleProfit,
     };
-  };
+  }, [saleItemsBySaleId, storeItemsById]);
 
   // =========================================================================
   // IFRS / GAAP ACCRUAL BASIS FINANCIAL AGGREGATIONS
@@ -228,7 +279,7 @@ export default function SalesReportPage() {
     const customer = customers.find(c => c.id === sale.customer_id);
     const debt = customerDebts.find(d => d.sale_id === sale.id);
     const acc = paymentAccounts.find(pa => pa.id === sale.payment_account_id);
-    
+
     setSelectedReceipt({
       sale,
       items,
@@ -260,12 +311,12 @@ export default function SalesReportPage() {
 
   return (
     <div className="min-h-screen bg-[#F8F9FA] dark:bg-background pb-12">
-      <PageHeader 
-        title="Sales Report" 
+      <PageHeader
+        title="Sales Report"
         rightAction={
           <div className="flex items-center gap-4">
-            <select 
-              value={selectedAccountId} 
+            <select
+              value={selectedAccountId}
               onChange={e => setSelectedAccountId(e.target.value)}
               className="px-4 py-2 h-10 rounded-xl border border-border bg-card text-sm font-bold shadow-sm focus:outline-none focus:border-primary transition-colors appearance-none"
             >
@@ -276,8 +327,8 @@ export default function SalesReportPage() {
             </select>
             <div className="flex bg-muted/50 p-1.5 rounded-xl border border-border">
               {(['today', 'month', 'all'] as const).map(t => (
-                <button 
-                  key={t} 
+                <button
+                  key={t}
                   onClick={() => setTab(t)}
                   className={`px-6 py-2 rounded-lg font-bold text-sm transition-all flex items-center justify-center gap-2 capitalize ${tab === t ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground hover:bg-black/5 dark:hover:bg-white/5'}`}
                 >
@@ -288,7 +339,7 @@ export default function SalesReportPage() {
           </div>
         }
       />
-      
+
       <div className="p-4 sm:p-6 md:px-8 space-y-8 max-w-7xl mx-auto w-full">
         {/* Date & Accounting Standard Badge */}
         <div className="flex flex-wrap items-center justify-between gap-4">
@@ -312,7 +363,7 @@ export default function SalesReportPage() {
           </div>
         ) : (
           <div className="space-y-8">
-            
+
             {/* Top Level Summary */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               {/* Net Profit Big Banner Card */}
@@ -335,39 +386,39 @@ export default function SalesReportPage() {
 
               {/* Accrual Core Metrics Grid */}
               <div className="lg:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-6">
-                <MetricCard 
-                  icon={BarChart3} 
-                  label="Total Revenue" 
-                  value={formatCurrency(totalRevenue)} 
-                  color="text-primary" 
-                  bgColor="bg-primary/10" 
+                <MetricCard
+                  icon={BarChart3}
+                  label="Total Revenue"
+                  value={formatCurrency(totalRevenue)}
+                  color="text-primary"
+                  bgColor="bg-primary/10"
                   subtitle="Invoiced Sales (Cash + Credit, Excl. Tax)"
                   badge="Accrual"
                 />
-                <MetricCard 
-                  icon={TrendingDown} 
-                  label="Cost of Goods (COGS)" 
-                  value={formatCurrency(totalCogs)} 
-                  color="text-indigo-600 dark:text-indigo-400" 
-                  bgColor="bg-indigo-500/10" 
+                <MetricCard
+                  icon={TrendingDown}
+                  label="Cost of Goods (COGS)"
+                  value={formatCurrency(totalCogs)}
+                  color="text-indigo-600 dark:text-indigo-400"
+                  bgColor="bg-indigo-500/10"
                   subtitle="Stored cost basis of items discharged"
                   badge="COGS"
                 />
-                <MetricCard 
-                  icon={TrendingUp} 
-                  label="Gross Profit" 
-                  value={formatCurrency(grossProfit)} 
-                  color="text-success" 
-                  bgColor="bg-success/10" 
+                <MetricCard
+                  icon={TrendingUp}
+                  label="Gross Profit"
+                  value={formatCurrency(grossProfit)}
+                  color="text-success"
+                  bgColor="bg-success/10"
                   subtitle="Total Revenue - COGS (Full Margin Earned)"
                   badge="On Sale Date"
                 />
-                <MetricCard 
-                  icon={DollarSign} 
-                  label="Operating Expenses" 
-                  value={formatCurrency(totalExpenses)} 
-                  color="text-destructive" 
-                  bgColor="bg-destructive/10" 
+                <MetricCard
+                  icon={DollarSign}
+                  label="Operating Expenses"
+                  value={formatCurrency(totalExpenses)}
+                  color="text-destructive"
+                  bgColor="bg-destructive/10"
                   subtitle="Operating overheads & staff costs"
                   badge="Expenses"
                 />
@@ -389,36 +440,36 @@ export default function SalesReportPage() {
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-                <MetricCard 
-                  icon={ArrowDownToLine} 
-                  label="Cash Inflow (POS)" 
-                  value={formatCurrency(totalCheckoutCash)} 
-                  color="text-primary" 
-                  bgColor="bg-primary/10" 
+                <MetricCard
+                  icon={ArrowDownToLine}
+                  label="Cash Inflow (POS)"
+                  value={formatCurrency(totalCheckoutCash)}
+                  color="text-primary"
+                  bgColor="bg-primary/10"
                   subtitle="Down payments & cash sales at checkout"
                 />
-                <MetricCard 
-                  icon={Wallet} 
-                  label="Credit Invoiced (AR)" 
-                  value={formatCurrency(totalCreditExtended)} 
-                  color="text-amber-600 dark:text-amber-400" 
-                  bgColor="bg-amber-500/10" 
+                <MetricCard
+                  icon={Wallet}
+                  label="Credit Invoiced (AR)"
+                  value={formatCurrency(totalCreditExtended)}
+                  color="text-amber-600 dark:text-amber-400"
+                  bgColor="bg-amber-500/10"
                   subtitle="Receivables created on credit sales"
                 />
-                <MetricCard 
-                  icon={BarChart3} 
-                  label="Debt Collections" 
-                  value={formatCurrency(totalDebtCollections)} 
-                  color="text-blue-500" 
-                  bgColor="bg-blue-500/10" 
+                <MetricCard
+                  icon={BarChart3}
+                  label="Debt Collections"
+                  value={formatCurrency(totalDebtCollections)}
+                  color="text-blue-500"
+                  bgColor="bg-blue-500/10"
                   subtitle="Cash collected on customer accounts"
                 />
-                <MetricCard 
-                  icon={Clock} 
-                  label="Outstanding Balance Due" 
-                  value={formatCurrency(totalOutstandingCredit)} 
-                  color="text-destructive" 
-                  bgColor="bg-destructive/10" 
+                <MetricCard
+                  icon={Clock}
+                  label="Outstanding Balance Due"
+                  value={formatCurrency(totalOutstandingCredit)}
+                  color="text-destructive"
+                  bgColor="bg-destructive/10"
                   subtitle="Unpaid credit remaining from period"
                 />
               </div>
@@ -426,29 +477,29 @@ export default function SalesReportPage() {
 
             {/* Operational & Tax Metrics */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-              <MetricCard 
-                icon={Package} 
-                label="Total Items Sold" 
-                value={totalItemsSold.toString()} 
-                color="text-foreground" 
-                bgColor="bg-muted" 
+              <MetricCard
+                icon={Package}
+                label="Total Items Sold"
+                value={totalItemsSold.toString()}
+                color="text-foreground"
+                bgColor="bg-muted"
                 subtitle="Sum of unit quantities sold"
               />
-              <MetricCard 
-                icon={FileText} 
-                label="Total Invoices / Sales" 
-                value={filteredSales.length.toString()} 
-                color="text-primary" 
-                bgColor="bg-primary/10" 
+              <MetricCard
+                icon={FileText}
+                label="Total Invoices / Sales"
+                value={filteredSales.length.toString()}
+                color="text-primary"
+                bgColor="bg-primary/10"
                 subtitle="Completed sales transactions"
               />
               {currentStore?.tax_enabled && (
-                <MetricCard 
-                  icon={DollarSign} 
-                  label="Tax Invoiced (Liability)" 
-                  value={formatCurrency(totalTaxInvoiced)} 
-                  color="text-amber-500" 
-                  bgColor="bg-amber-500/10" 
+                <MetricCard
+                  icon={DollarSign}
+                  label="Tax Invoiced (Liability)"
+                  value={formatCurrency(totalTaxInvoiced)}
+                  color="text-amber-500"
+                  bgColor="bg-amber-500/10"
                   subtitle="Tax liability (excluded from profit)"
                 />
               )}
@@ -472,7 +523,7 @@ export default function SalesReportPage() {
                     ))
                   ) : (
                     <div className="col-span-2 p-8 border border-dashed border-border rounded-2xl text-center">
-                       <p className="text-sm font-bold text-muted-foreground">No payment accounts configured</p>
+                      <p className="text-sm font-bold text-muted-foreground">No payment accounts configured</p>
                     </div>
                   )}
                 </div>
@@ -494,109 +545,108 @@ export default function SalesReportPage() {
                     ))
                   ) : (
                     <div className="col-span-2 p-8 border border-dashed border-border rounded-2xl text-center">
-                       <p className="text-sm font-bold text-muted-foreground">No payment accounts configured</p>
+                      <p className="text-sm font-bold text-muted-foreground">No payment accounts configured</p>
                     </div>
                   )}
                 </div>
               </div>
             </div>
-            
+
             {/* Filtered Transactions List */}
             <div className="bg-card rounded-3xl border border-border shadow-sm overflow-hidden mt-8">
-               <div className="p-6 border-b border-border/50 bg-muted/10 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                 <div>
-                   <h3 className="font-black text-foreground text-xl capitalize">Invoices & Transactions List</h3>
-                   <p className="text-sm text-muted-foreground mt-1">Filtered by your selected date and payment account. Click receipt reference to view full POS breakdown.</p>
-                 </div>
-                 <div className="text-xs font-bold text-muted-foreground bg-muted/40 px-3 py-1.5 rounded-xl border border-border/50">
-                   {filteredSales.length} {filteredSales.length === 1 ? 'Invoice' : 'Invoices'} Recorded
-                 </div>
-               </div>
-               <div className="overflow-x-auto">
-                 <table className="w-full text-left border-collapse">
-                   <thead className="bg-muted/30 border-b border-border">
-                     <tr>
-                       <th className="px-5 py-4 text-[11px] font-bold text-muted-foreground capitalize tracking-widest">Time</th>
-                       <th className="px-5 py-4 text-[11px] font-bold text-muted-foreground capitalize tracking-widest">Receipt</th>
-                       <th className="px-5 py-4 text-[11px] font-bold text-muted-foreground capitalize tracking-widest">Type</th>
-                       <th className="px-5 py-4 text-[11px] font-bold text-muted-foreground capitalize tracking-widest text-right">Revenue (Ex. Tax)</th>
-                       <th className="px-5 py-4 text-[11px] font-bold text-muted-foreground capitalize tracking-widest text-right">COGS</th>
-                       <th className="px-5 py-4 text-[11px] font-bold text-muted-foreground capitalize tracking-widest text-right">Gross Profit</th>
-                       <th className="px-5 py-4 text-[11px] font-bold text-muted-foreground capitalize tracking-widest text-right">Total Invoice</th>
-                       <th className="px-5 py-4 text-[11px] font-bold text-muted-foreground capitalize tracking-widest text-right">Paid at POS</th>
-                       <th className="px-5 py-4 text-[11px] font-bold text-muted-foreground capitalize tracking-widest text-center">Status</th>
-                     </tr>
-                   </thead>
-                   <tbody className="divide-y divide-border/50">
-                     {filteredSales.map(sale => {
-                       const { saleRevenue, saleCogs, saleProfit } = getSaleFinancials(sale);
-                       const checkoutCash = getSaleCheckoutCash(sale);
-                       const isFullyPaid = Number(sale.outstanding_amount || 0) === 0;
+              <div className="p-6 border-b border-border/50 bg-muted/10 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <h3 className="font-black text-foreground text-xl capitalize">Invoices & Transactions List</h3>
+                  <p className="text-sm text-muted-foreground mt-1">Filtered by your selected date and payment account. Click receipt reference to view full POS breakdown.</p>
+                </div>
+                <div className="text-xs font-bold text-muted-foreground bg-muted/40 px-3 py-1.5 rounded-xl border border-border/50">
+                  {filteredSales.length} {filteredSales.length === 1 ? 'Invoice' : 'Invoices'} Recorded
+                </div>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead className="bg-muted/30 border-b border-border">
+                    <tr>
+                      <th className="px-5 py-4 text-[11px] font-bold text-muted-foreground capitalize tracking-widest">Time</th>
+                      <th className="px-5 py-4 text-[11px] font-bold text-muted-foreground capitalize tracking-widest">Receipt</th>
+                      <th className="px-5 py-4 text-[11px] font-bold text-muted-foreground capitalize tracking-widest">Type</th>
+                      <th className="px-5 py-4 text-[11px] font-bold text-muted-foreground capitalize tracking-widest text-right">Revenue (Ex. Tax)</th>
+                      <th className="px-5 py-4 text-[11px] font-bold text-muted-foreground capitalize tracking-widest text-right">COGS</th>
+                      <th className="px-5 py-4 text-[11px] font-bold text-muted-foreground capitalize tracking-widest text-right">Gross Profit</th>
+                      <th className="px-5 py-4 text-[11px] font-bold text-muted-foreground capitalize tracking-widest text-right">Total Invoice</th>
+                      <th className="px-5 py-4 text-[11px] font-bold text-muted-foreground capitalize tracking-widest text-right">Paid at POS</th>
+                      <th className="px-5 py-4 text-[11px] font-bold text-muted-foreground capitalize tracking-widest text-center">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border/50">
+                    {filteredSales.map(sale => {
+                      const { saleRevenue, saleCogs, saleProfit } = getSaleFinancials(sale);
+                      const checkoutCash = getSaleCheckoutCash(sale);
+                      const isFullyPaid = Number(sale.outstanding_amount || 0) === 0;
 
-                       return (
-                         <tr key={sale.id} className="hover:bg-muted/30 transition-colors">
-                           <td className="px-5 py-4 text-xs font-medium text-foreground">
-                              {new Date(sale.sold_at || sale.created_at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}
-                           </td>
-                           <td className="px-5 py-4">
-                             <button
-                               type="button"
-                               onClick={() => handleOpenReceipt(sale)}
-                               title="Click to view full POS receipt details"
-                               className="inline-flex items-center gap-1.5 text-xs font-mono font-bold text-primary hover:text-primary/80 hover:underline transition-all group"
-                             >
-                               <Receipt size={13} className="text-primary group-hover:scale-110 transition-transform" />
-                               <span>{sale.receipt_no}</span>
-                             </button>
-                           </td>
-                           <td className="px-5 py-4">
-                             <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold capitalize tracking-wider ${
-                               sale.sale_type === 'cash' 
-                                 ? 'bg-success/10 text-success border border-success/20' 
-                                 : sale.sale_type === 'mixed'
-                                 ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20'
-                                 : 'bg-primary/10 text-primary border border-primary/20'
-                             }`}>
-                               {sale.sale_type}
-                             </span>
-                           </td>
-                           <td className="px-5 py-4 text-right text-xs font-bold text-foreground">
-                             {formatCurrency(saleRevenue)}
-                           </td>
-                           <td className="px-5 py-4 text-right text-xs font-medium text-muted-foreground">
-                             {formatCurrency(saleCogs)}
-                           </td>
-                           <td className="px-5 py-4 text-right text-xs font-black text-success">
-                             +{formatCurrency(saleProfit)}
-                           </td>
-                           <td className="px-5 py-4 text-right text-xs font-bold text-foreground">
-                             {formatCurrency(sale.total)}
-                           </td>
-                           <td className="px-5 py-4 text-right text-xs font-bold text-primary">
-                             {formatCurrency(checkoutCash)}
-                           </td>
-                           <td className="px-5 py-4 text-center">
-                             {isFullyPaid ? (
-                               <span className="inline-flex items-center gap-1 text-[10px] font-bold text-success bg-success/10 border border-success/20 px-2 py-0.5 rounded-full capitalize">
-                                 <CheckCircle2 size={11} /> Settled
-                               </span>
-                             ) : (
-                               <span className="inline-flex items-center gap-1 text-[10px] font-bold text-destructive bg-destructive/10 border border-destructive/20 px-2 py-0.5 rounded-full capitalize">
-                                 <Clock size={11} /> Due: {formatCurrency(sale.outstanding_amount)}
-                               </span>
-                             )}
-                           </td>
-                         </tr>
-                       );
-                     })}
-                     {filteredSales.length === 0 && (
-                        <tr>
-                          <td colSpan={9} className="px-6 py-12 text-center text-muted-foreground text-sm font-medium">No sales found matching these filters.</td>
+                      return (
+                        <tr key={sale.id} className="hover:bg-muted/30 transition-colors">
+                          <td className="px-5 py-4 text-xs font-medium text-foreground">
+                            {new Date(sale.sold_at || sale.created_at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}
+                          </td>
+                          <td className="px-5 py-4">
+                            <button
+                              type="button"
+                              onClick={() => handleOpenReceipt(sale)}
+                              title="Click to view full POS receipt details"
+                              className="inline-flex items-center gap-1.5 text-xs font-mono font-bold text-primary hover:text-primary/80 hover:underline transition-all group"
+                            >
+                              <Receipt size={13} className="text-primary group-hover:scale-110 transition-transform" />
+                              <span>{sale.receipt_no}</span>
+                            </button>
+                          </td>
+                          <td className="px-5 py-4">
+                            <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold capitalize tracking-wider ${sale.sale_type === 'cash'
+                                ? 'bg-success/10 text-success border border-success/20'
+                                : sale.sale_type === 'mixed'
+                                  ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20'
+                                  : 'bg-primary/10 text-primary border border-primary/20'
+                              }`}>
+                              {sale.sale_type}
+                            </span>
+                          </td>
+                          <td className="px-5 py-4 text-right text-xs font-bold text-foreground">
+                            {formatCurrency(saleRevenue)}
+                          </td>
+                          <td className="px-5 py-4 text-right text-xs font-medium text-muted-foreground">
+                            {formatCurrency(saleCogs)}
+                          </td>
+                          <td className="px-5 py-4 text-right text-xs font-black text-success">
+                            +{formatCurrency(saleProfit)}
+                          </td>
+                          <td className="px-5 py-4 text-right text-xs font-bold text-foreground">
+                            {formatCurrency(sale.total)}
+                          </td>
+                          <td className="px-5 py-4 text-right text-xs font-bold text-primary">
+                            {formatCurrency(checkoutCash)}
+                          </td>
+                          <td className="px-5 py-4 text-center">
+                            {isFullyPaid ? (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-bold text-success bg-success/10 border border-success/20 px-2 py-0.5 rounded-full capitalize">
+                                <CheckCircle2 size={11} /> Settled
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-bold text-destructive bg-destructive/10 border border-destructive/20 px-2 py-0.5 rounded-full capitalize">
+                                <Clock size={11} /> Due: {formatCurrency(sale.outstanding_amount)}
+                              </span>
+                            )}
+                          </td>
                         </tr>
-                     )}
-                   </tbody>
-                 </table>
-               </div>
+                      );
+                    })}
+                    {filteredSales.length === 0 && (
+                      <tr>
+                        <td colSpan={9} className="px-6 py-12 text-center text-muted-foreground text-sm font-medium">No sales found matching these filters.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
 
           </div>
@@ -613,7 +663,7 @@ export default function SalesReportPage() {
                 <Receipt size={18} className="text-primary" />
                 <h3 className="font-bold text-foreground text-sm">POS Sale Receipt #{selectedReceipt.sale.receipt_no}</h3>
               </div>
-              <button 
+              <button
                 onClick={() => setSelectedReceipt(null)}
                 className="w-8 h-8 rounded-full hover:bg-muted flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
               >
@@ -707,8 +757,8 @@ export default function SalesReportPage() {
 
             {/* Footer */}
             <div className="p-4 border-t border-border bg-muted/20 flex gap-3">
-              <button 
-                type="button" 
+              <button
+                type="button"
                 onClick={() => {
                   window.print();
                 }}
@@ -716,8 +766,8 @@ export default function SalesReportPage() {
               >
                 <Printer size={14} /> Print Receipt
               </button>
-              <button 
-                type="button" 
+              <button
+                type="button"
                 onClick={() => setSelectedReceipt(null)}
                 className="px-4 py-2.5 rounded-xl border border-border bg-card text-foreground text-xs font-bold hover:bg-muted transition-colors"
               >

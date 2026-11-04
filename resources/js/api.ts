@@ -241,7 +241,31 @@ class LaravelAuthMock {
     };
   }
 
+  private initialHydrated = false;
+
   async getSession() {
+    if (!this.initialHydrated) {
+      this.initialHydrated = true;
+      try {
+        const appEl = document.getElementById('app');
+        const rawPage = appEl?.dataset?.page || document.querySelector('script[data-page="app"]')?.textContent;
+        if (rawPage) {
+          const parsed = JSON.parse(rawPage);
+          const inertiaUser = parsed?.props?.auth?.user;
+          const inertiaStores = parsed?.props?.auth?.stores;
+          if (inertiaUser && inertiaUser.id) {
+            const user = {
+              ...inertiaUser,
+              full_name: inertiaUser.full_name || inertiaUser.name || '',
+              stores: Array.isArray(inertiaStores) ? inertiaStores : inertiaUser.stores,
+            };
+            const session: Session = { access_token: 'session', user };
+            return { data: { session }, error: null };
+          }
+        }
+      } catch (_) {}
+    }
+
     try {
       const res = await fetch(`${API_URL}/user`, { 
           headers: getHeaders(),

@@ -1,8 +1,7 @@
-import { useState } from 'react';
+import { useState, useMemo, lazy, Suspense } from 'react';
 import { useApp } from '@/context/AppContext';
 import PageHeader from '@/components/PageHeader';
 import { Search, Trash2, Download, Plus, ScanBarcode, AlertTriangle, Package, Pencil, Upload, X, Box, BarChart2 } from 'lucide-react';
-import * as XLSX from 'xlsx';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -13,9 +12,10 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import BarcodeScanner from '@/components/BarcodeScanner';
 import { toast } from 'sonner';
 import { SearchableSelect } from '@/components/ui/searchable-select';
+
+const BarcodeScanner = lazy(() => import('@/components/BarcodeScanner'));
 
 type StockFilter = 'all' | 'in_stock' | 'low_stock' | 'out_of_stock';
 
@@ -147,11 +147,12 @@ export default function InventoryPage() {
     }
   };
 
-  const handleDownloadExcel = () => {
+  const handleDownloadExcel = async () => {
     if (storeItems.length === 0) {
       toast.error('No items to export');
       return;
     }
+    const XLSX = await import('xlsx');
     const dataToExport = storeItems.map(item => ({
       Type: item.type,
       Name: item.name,
@@ -173,6 +174,7 @@ export default function InventoryPage() {
   const handleUploadExcel = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    const XLSX = await import('xlsx');
     
     const reader = new FileReader();
     reader.onload = async (evt) => {
@@ -226,7 +228,8 @@ export default function InventoryPage() {
     reader.readAsBinaryString(file);
   };
 
-  const handleDownloadSample = () => {
+  const handleDownloadSample = async () => {
+    const XLSX = await import('xlsx');
     const sampleData = [{
       Type: 'product',
       Name: 'Sample Product Name',
@@ -648,13 +651,15 @@ export default function InventoryPage() {
       )}
       
       {showScanner && (
-        <BarcodeScanner
-          onScan={(code) => {
-            setForm(f => ({ ...f, barcode: code }));
-            setShowScanner(false);
-          }}
-          onClose={() => setShowScanner(false)}
-        />
+        <Suspense fallback={<div className="fixed inset-0 z-50 bg-background/80 flex items-center justify-center text-sm font-bold">Loading scanner...</div>}>
+          <BarcodeScanner
+            onScan={(code) => {
+              setForm(f => ({ ...f, barcode: code }));
+              setShowScanner(false);
+            }}
+            onClose={() => setShowScanner(false)}
+          />
+        </Suspense>
       )}
 
       <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>

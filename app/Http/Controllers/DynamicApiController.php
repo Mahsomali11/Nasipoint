@@ -25,7 +25,6 @@ class DynamicApiController extends Controller
 
     public function index(Request $request, $table)
     {
-        \Illuminate\Support\Facades\Log::info("DynamicAPI Index: $table", $request->all());
         $class = $this->getModelClass($table);
         $query = $class::query();
 
@@ -157,7 +156,9 @@ class DynamicApiController extends Controller
             $body = $request->post();
         }
         
-        \Illuminate\Support\Facades\Log::info("DynamicAPI Store Payload: $table", $body);
+        if (in_array($table, ['stores', 'staff_accounts', 'licenses', 'plans', 'system_settings', 'admin_roles'], true)) {
+            \Illuminate\Support\Facades\Cache::flush();
+        }
 
         if (is_array($body) && isset($body[0]) && is_array($body[0])) {
             // Check for rapid duplicate bulk insert (e.g. sale_items for the same sale)
@@ -299,11 +300,14 @@ class DynamicApiController extends Controller
     {
         $class = $this->getModelClass($table);
 
+        if (in_array($table, ['stores', 'staff_accounts', 'licenses', 'plans', 'system_settings', 'admin_roles'], true)) {
+            \Illuminate\Support\Facades\Cache::flush();
+        }
+
         if ($table === 'expenses') {
             $user = $request->user() ?? auth()->user();
-            $isAdmin = $user && \Illuminate\Support\Facades\DB::table('admin_roles')->where('user_id', $user->id)->where('is_active', true)->exists();
-            $isOwner = $user && \Illuminate\Support\Facades\DB::table('stores')->where('owner_user_id', $user->id)->exists();
-            if (!$isAdmin && !$isOwner) {
+            $access = $user ? \App\Support\AccessCache::getUserAccess($user) : ['is_admin' => false, 'is_any_owner' => false];
+            if (!$access['is_admin'] && !$access['is_any_owner']) {
                 return response()->json(['error' => 'Forbidden: Only Store Owners and Admins are permitted to edit expenses.'], 403);
             }
         }
@@ -371,11 +375,14 @@ class DynamicApiController extends Controller
     {
         $class = $this->getModelClass($table);
 
+        if (in_array($table, ['stores', 'staff_accounts', 'licenses', 'plans', 'system_settings', 'admin_roles'], true)) {
+            \Illuminate\Support\Facades\Cache::flush();
+        }
+
         if ($table === 'expenses') {
             $user = $request->user() ?? auth()->user();
-            $isAdmin = $user && \Illuminate\Support\Facades\DB::table('admin_roles')->where('user_id', $user->id)->where('is_active', true)->exists();
-            $isOwner = $user && \Illuminate\Support\Facades\DB::table('stores')->where('owner_user_id', $user->id)->exists();
-            if (!$isAdmin && !$isOwner) {
+            $access = $user ? \App\Support\AccessCache::getUserAccess($user) : ['is_admin' => false, 'is_any_owner' => false];
+            if (!$access['is_admin'] && !$access['is_any_owner']) {
                 return response()->json(['error' => 'Forbidden: Only Store Owners and Admins are permitted to delete expenses.'], 403);
             }
         }

@@ -17,4 +17,7 @@ class SaleItem extends Model
         'line_total' => 'float',
         'tax_amount' => 'float',
     ];
+
+    public function sale() { return $this->belongsTo(Sale::class, 'sale_id'); }
+    public function item() { return $this->belongsTo(Item::class, 'item_id'); }
 }

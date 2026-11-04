@@ -21,11 +21,9 @@ class BlockAdminMiddleware
             return $next($request);
         }
 
-        $userId = Auth::id();
-        $isAdmin = DB::table('admin_roles')
-            ->where('user_id', $userId)
-            ->where('is_active', true)
-            ->exists();
+        $user = Auth::user();
+        $access = $user ? \App\Support\AccessCache::getUserAccess($user) : ['is_admin' => false];
+        $isAdmin = $access['is_admin'];
 
         if ($isAdmin) {
             // Admin is trying to use normal user routes — redirect to admin dashboard

@@ -15,6 +15,9 @@ class ReturnModel extends Model
         'refund_amount' => 'float',
     ];
 
+    public function sale() { return $this->belongsTo(Sale::class, 'sale_id'); }
+    public function processor() { return $this->belongsTo(User::class, 'processed_by'); }
+
     protected static function booted()
     {
         static::addGlobalScope(new \App\Models\Scopes\StaffActivityScope('processed_by'));

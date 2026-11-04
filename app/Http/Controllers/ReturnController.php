@@ -55,22 +55,28 @@ class ReturnController extends Controller
                 'updated_at' => now(),
             ]);
 
-            // 2. Process Items
+            // 2. Process Items (Preload items & sale_items to avoid N+1 queries)
+            $itemIds = array_values(array_unique(array_column($request->items, 'item_id')));
+            $saleItemIds = array_values(array_unique(array_column($request->items, 'sale_item_id')));
+            $itemsMap = DB::table('items')->whereIn('id', $itemIds)->get()->keyBy('id');
+            $saleItemsMap = DB::table('sale_items')->whereIn('id', $saleItemIds)->get()->keyBy('id');
+            $now = now();
+            $returnItemsBatch = [];
+
             foreach ($request->items as $i) {
-                // Insert ReturnItem
-                DB::table('return_items')->insert([
+                $returnItemsBatch[] = [
                     'id' => (string) Str::uuid(),
                     'return_id' => $returnId,
                     'sale_item_id' => $i['sale_item_id'],
                     'item_id' => $i['item_id'],
                     'quantity' => $i['quantity'],
                     'amount' => $i['amount'],
-                    'created_at' => now(),
-                    'updated_at' => now(),
-                ]);
+                    'created_at' => $now,
+                    'updated_at' => $now,
+                ];
 
                 // Restore Inventory
-                $item = DB::table('items')->where('id', $i['item_id'])->first();
+                $item = $itemsMap->get($i['item_id']);
                 if ($item && $item->type === 'product') {
                     DB::table('items')
                         ->where('id', $i['item_id'])
@@ -78,7 +84,7 @@ class ReturnController extends Controller
                 }
 
                 // Adjust Sale Item
-                $saleItem = DB::table('sale_items')->where('id', $i['sale_item_id'])->first();
+                $saleItem = $saleItemsMap->get($i['sale_item_id']);
                 if ($saleItem) {
                     $newQty = max(0, $saleItem->quantity - $i['quantity']);
                     $newLineTotal = max(0, $saleItem->line_total - $i['amount']);
@@ -87,9 +93,13 @@ class ReturnController extends Controller
                         ->update([
                             'quantity' => $newQty,
                             'line_total' => $newLineTotal,
-                            'updated_at' => now(),
+                            'updated_at' => $now,
                         ]);
                 }
+            }
+
+            if (!empty($returnItemsBatch)) {
+                DB::table('return_items')->insert($returnItemsBatch);
             }
 
             // 3. Adjust Sale

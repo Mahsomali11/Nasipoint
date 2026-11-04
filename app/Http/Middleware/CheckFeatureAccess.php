@@ -67,70 +67,23 @@ class CheckFeatureAccess
             $requestedStoreId = substr($requestedStoreId, 3);
         }
 
-        // Get store owner
-        $store = Store::find($requestedStoreId);
-        if (!$store) {
+        // Evaluate cached store & license with real-time expiration check
+        $evaluated = \App\Support\AccessCache::evaluateStoreLicense((string) $requestedStoreId);
+        if (!$evaluated['store_exists']) {
             return response()->json(['error' => 'Store not found'], 404);
         }
 
-        // Check license and features for this owner/store
-        // 1. Query active license for this store/owner first
-        $license = DB::table('licenses')
-            ->where(function ($q) use ($store) {
-                $q->where('owner_user_id', $store->owner_user_id);
-                if ($store->id) {
-                    $q->orWhere('store_id', $store->id);
-                }
-            })
-            ->where('status', 'active')
-            ->orderBy('expiry_date', 'desc')
-            ->first();
-
-        // 2. If no active license found, fetch the most recent license record
-        if (!$license) {
-            $license = DB::table('licenses')
-                ->where(function ($q) use ($store) {
-                    $q->where('owner_user_id', $store->owner_user_id);
-                    if ($store->id) {
-                        $q->orWhere('store_id', $store->id);
-                    }
-                })
-                ->orderBy('created_at', 'desc')
-                ->first();
-        }
-
-        // If no license system applied yet, assume all features enabled (backward compatibility)
-        if (!$license || $license->status === 'none') {
+        $licenseStatus = $evaluated['licenseStatus'];
+        if (($licenseStatus['status'] ?? 'none') === 'none') {
             return $next($request);
         }
 
-        $status = strtolower($license->status ?? '');
-
-        // Explicitly block if status is suspended, canceled, or expired
-        if (in_array($status, ['suspended', 'canceled', 'cancelled', 'expired'])) {
+        if (empty($licenseStatus['valid'])) {
             return response()->json(['error' => 'License expired or suspended. Please renew your subscription.'], 403);
         }
 
-        // Timestamp validation: A store MUST be allowed full system access and checkout capabilities
-        // until the exact expiration timestamp (expires_at > now()).
-        // Only block transactions if expires_at <= now().
-        $expiryTimestamp = $license->expiry_date ?? $license->expires_at ?? null;
-        if ($expiryTimestamp) {
-            $expiresAt = \Carbon\Carbon::parse($expiryTimestamp);
-            if ($expiresAt->lessThanOrEqualTo(now())) {
-                return response()->json(['error' => 'License expired or suspended. Please renew your subscription.'], 403);
-            }
-        }
-
-        // Must be active to proceed
-        if ($status !== 'active') {
-            return response()->json(['error' => 'License expired or suspended. Please renew your subscription.'], 403);
-        }
-
-        $features = json_decode($license->features_enabled, true);
-
-        // If features is somehow invalid or empty, deny
-        if (!is_array($features) || empty($features)) {
+        $features = $evaluated['storeFeatures'] ?? [];
+        if (empty($features) || !is_array($features)) {
             return response()->json(['error' => 'Feature not enabled in your current plan.'], 403);
         }
 

@@ -88,11 +88,11 @@ interface AppState {
 
 interface AppContextType extends Omit<AppState, 'session'> {
   storeFeatures: StoreFeatures;
-  user: { 
-    id: string; 
-    email: string; 
-    full_name: string; 
-    phone: string; 
+  user: {
+    id: string;
+    email: string;
+    full_name: string;
+    phone: string;
     created_at: string;
     role?: 'owner' | 'admin' | 'cashier' | 'inventory_manager';
     assigned_store_id?: string | null;
@@ -208,11 +208,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return true;
   })();
 
-  // Load all data for a store
+  // Load all data for a store (including licenseStatus & storeFeatures in a single RPC call)
   const loadStoreData = useCallback(async (storeId: string) => {
     try {
       const { data } = await apiClient.rpc('get_store_data', { _store_id: storeId });
-      
+
       if (data) {
         setState(prev => ({
           ...prev,
@@ -231,6 +231,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
           purchases: (data.purchases || []) as unknown as Purchase[],
           purchaseItems: (data.purchaseItems || []) as unknown as PurchaseItem[],
           accountTransfers: (data.accountTransfers || []) as unknown as AccountTransfer[],
+          licenseStatus: data.licenseStatus ? (data.licenseStatus as unknown as LicenseInfo) : prev.licenseStatus,
+          storeFeatures: data.storeFeatures ? (data.storeFeatures as unknown as StoreFeatures) : prev.storeFeatures,
         }));
       }
     } catch (e) {
@@ -241,7 +243,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const loadUserData = useCallback(async (userId: string, session: Session) => {
     try {
-      // Use the user data directly from the session instead of querying the backend and retrying
       const user = session.user as any;
       const profile = {
         id: user.id,
@@ -253,40 +254,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const role = user.role || 'owner';
       const assignedStoreId = user.assigned_store_id;
 
-      let storesResponse;
-      if (role === 'owner') {
-        storesResponse = await apiClient.from('stores').select('*').eq('owner_user_id', userId);
-      } else if (assignedStoreId) {
-        storesResponse = await apiClient.from('stores').select('*').eq('id', assignedStoreId);
+      let storeList: Store[] = [];
+      if (Array.isArray(user.stores) && user.stores.length > 0) {
+        storeList = user.stores as Store[];
       } else {
-        storesResponse = { data: [] };
+        let storesResponse;
+        if (role === 'owner') {
+          storesResponse = await apiClient.from('stores').select('*').eq('owner_user_id', userId);
+        } else if (assignedStoreId) {
+          storesResponse = await apiClient.from('stores').select('*').eq('id', assignedStoreId);
+        } else {
+          storesResponse = { data: [] };
+        }
+        storeList = (storesResponse.data || []) as unknown as Store[];
       }
-      
-      const { data: stores } = storesResponse;
 
-      const storeList = (stores || []) as unknown as Store[];
       const savedStoreId = localStorage.getItem('currentStoreId');
       const currentStore = storeList.find(s => s.id === savedStoreId) || storeList[0] || null;
-
-      // Check license status (owner-level)
-      let licenseStatus: LicenseInfo | null = null;
-      let storeFeatures: StoreFeatures = {};
-      if (currentStore) {
-        try {
-          const [{ data: licData }, { data: featData }] = await Promise.all([
-            apiClient.rpc('check_store_license', { _store_id: currentStore.id }),
-            apiClient.rpc('get_store_features', { _store_id: currentStore.id }),
-          ]);
-          if (licData && typeof licData === 'object') {
-            licenseStatus = licData as unknown as LicenseInfo;
-          }
-          if (featData && typeof featData === 'object') {
-            storeFeatures = featData as unknown as StoreFeatures;
-          }
-        } catch (e) {
-          console.error('License check failed:', e);
-        }
-      }
 
       setState(prev => ({
         ...prev,
@@ -296,8 +280,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
         currentStore,
         isAuthenticated: true,
         loading: false,
-        licenseStatus,
-        storeFeatures,
       }));
 
       if (currentStore) {
@@ -360,20 +342,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const refreshData = useCallback(async () => {
     if (state.currentStore) {
       await loadStoreData(state.currentStore.id);
-      // Also refresh license status
-      try {
-        const [{ data: licData }, { data: featData }] = await Promise.all([
-          apiClient.rpc('check_store_license', { _store_id: state.currentStore.id }),
-          apiClient.rpc('get_store_features', { _store_id: state.currentStore.id }),
-        ]);
-        setState(prev => ({
-          ...prev,
-          licenseStatus: licData ? (licData as unknown as LicenseInfo) : prev.licenseStatus,
-          storeFeatures: featData ? (featData as unknown as StoreFeatures) : prev.storeFeatures,
-        }));
-      } catch (e) {
-        console.error('License refresh failed:', e);
-      }
     }
   }, [state.currentStore, loadStoreData]);
 
@@ -419,7 +387,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     localStorage.setItem('currentStoreId', store.id);
     setState(prev => ({ ...prev, currentStore: store }));
     loadStoreData(store.id);
-    
+
     // Refresh license for the new store context
     try {
       const [{ data: licData }, { data: featData }] = await Promise.all([
@@ -795,142 +763,150 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const subtotal = state.cart.reduce((sum, c) => sum + c.line_total, 0);
       if (subtotal === 0) return null;
 
-    // Backend constraint: Prevent checkout if any item's selling price is less than its cost price
-    const invalidItem = state.cart.find(c => c.item.sell_price < c.item.cost_price);
-    if (invalidItem) {
-      throw new Error(`Transaction rejected: Selling price for ${invalidItem.item.name} is less than its cost price.`);
-    }
-    
-    const storeTaxRate = state.currentStore?.tax_enabled ? (state.currentStore.tax_rate || 0) : 0;
-    const tax = subtotal * (storeTaxRate / 100);
-    const total = subtotal + tax;
-
-    const outstanding = Math.max(0, Math.round((total - paidAmount) * 100) / 100);
-    const receiptNo = `RCP-${Date.now()}`;
-    
-    let userId = state.session?.user?.id || state.profile?.id || '';
-    if (!userId) {
-      try {
-        const { data: userData } = await apiClient.auth.getUser();
-        if (userData?.user?.id) {
-          userId = userData.user.id;
-        }
-      } catch (e) {}
-    }
-    if (!userId) {
-      throw new Error("User session not found. Please log in again to complete this sale.");
-    }
-
-    const storeId = state.currentStore?.id || '';
-    if (!storeId) {
-      throw new Error("No active store selected.");
-    }
-
-    const { data: saleData, error: saleError } = await apiClient.from('sales').insert({
-      store_id: storeId,
-      receipt_no: receiptNo,
-      customer_id: customerId || null,
-      staff_user_id: userId,
-      sale_type: saleType,
-      subtotal,
-      discount: 0,
-      tax,
-      tax_rate: storeTaxRate,
-      total,
-      paid_amount: paidAmount,
-      outstanding_amount: outstanding,
-      status: 'completed',
-      payment_account_id: paymentAccountId || null,
-    } as any).select().single();
-
-    if (saleError || !saleData) {
-      console.error("Sale insertion error:", saleError);
-      throw new Error(saleError?.message || "Failed to record sale in database");
-    }
-    const sale = saleData as unknown as Sale;
-
-    const saleItemsData = state.cart.map(c => ({
-      sale_id: saleData.id,
-      item_id: c.item.id,
-      item_name: c.item.name,
-      quantity: Number(c.quantity) || 1,
-      cost_price: Number(c.item.cost_price) || 0,
-      sell_price: Number(c.item.sell_price) || 0,
-      line_total: Number(c.line_total) || 0,
-    }));
-    const { error: itemsError } = await apiClient.from('sale_items').insert(saleItemsData as any);
-    if (itemsError) {
-      console.error("Sale items insertion error:", itemsError);
-      throw new Error(itemsError.message || "Failed to record sale items in database");
-    }
-
-    for (const c of state.cart) {
-      if (c.item.type === 'product' || !c.item.is_service) {
-        const newQty = Math.max(0, Number(c.item.quantity) - Number(c.quantity));
-        await apiClient.from('items').update({ quantity: newQty } as any).eq('id', c.item.id);
+      // Backend constraint: Prevent checkout if any item's selling price is less than its cost price
+      const invalidItem = state.cart.find(c => c.item.sell_price < c.item.cost_price);
+      if (invalidItem) {
+        throw new Error(`Transaction rejected: Selling price for ${invalidItem.item.name} is less than its cost price.`);
       }
-    }
 
-    let paymentRecord: Payment | null = null;
-    if (paidAmount > 0) {
-      const paymentPayload = {
+      const storeTaxRate = state.currentStore?.tax_enabled ? (state.currentStore.tax_rate || 0) : 0;
+      const tax = subtotal * (storeTaxRate / 100);
+      const total = subtotal + tax;
+
+      const outstanding = Math.max(0, Math.round((total - paidAmount) * 100) / 100);
+      const receiptNo = `RCP-${Date.now()}`;
+
+      let userId = state.session?.user?.id || state.profile?.id || '';
+      if (!userId) {
+        try {
+          const { data: userData } = await apiClient.auth.getUser();
+          if (userData?.user?.id) {
+            userId = userData.user.id;
+          }
+        } catch (e) { }
+      }
+      if (!userId) {
+        throw new Error("User session not found. Please log in again to complete this sale.");
+      }
+
+      const storeId = state.currentStore?.id || '';
+      if (!storeId) {
+        throw new Error("No active store selected.");
+      }
+
+      const { data: saleData, error: saleError } = await apiClient.from('sales').insert({
         store_id: storeId,
-        sale_id: sale.id,
+        receipt_no: receiptNo,
         customer_id: customerId || null,
-        payment_type: 'sale',
-        direction: 'in',
-        method: saleType === 'cash' ? 'cash' : (outstanding > 0 ? 'partial_cash' : 'split_payment'),
+        staff_user_id: userId,
+        sale_type: saleType,
+        subtotal,
+        discount: 0,
+        tax,
+        tax_rate: storeTaxRate,
+        total,
+        paid_amount: paidAmount,
+        outstanding_amount: outstanding,
+        status: 'completed',
         payment_account_id: paymentAccountId || null,
-        amount: paidAmount,
-        reference: receiptNo,
-        created_by: userId,
-      };
-      const { data: pData, error: pError } = await apiClient.from('payments').insert(paymentPayload as any).select().single();
-      if (pError) console.error("Payment record error:", pError);
-      paymentRecord = (pData || paymentPayload) as unknown as Payment;
-    }
+      } as any).select().single();
 
-    let debtRecord: CustomerDebt | null = null;
-    if (outstanding > 0 && customerId) {
-      const customer = state.customers.find(c => c.id === customerId);
-      const debtPayload = {
-        store_id: storeId,
-        customer_id: customerId,
-        customer_name: customer?.name || '',
-        sale_id: sale.id,
-        original_amount: outstanding,
-        balance_amount: outstanding,
-        status: 'open',
-        notes: 'POS Sale Credit',
-      };
-      const { data: dData, error: dError } = await apiClient.from('customer_debts').insert(debtPayload as any).select().single();
-      if (dError) console.error("Customer debt record error:", dError);
-      debtRecord = (dData || debtPayload) as unknown as CustomerDebt;
-    }
+      if (saleError || !saleData) {
+        console.error("Sale insertion error:", saleError);
+        throw new Error(saleError?.message || "Failed to record sale in database");
+      }
+      const sale = saleData as unknown as Sale;
 
-    setState(prev => ({
-      ...prev,
-      cart: [],
-      sales: [sale, ...prev.sales.filter(s => s.id !== sale.id)],
-      saleItems: [...saleItemsData.map((si, idx) => ({ ...si, id: `si-${Date.now()}-${idx}` } as unknown as SaleItem)), ...prev.saleItems],
-      payments: paymentRecord ? [paymentRecord, ...prev.payments] : prev.payments,
-      customerDebts: debtRecord ? [debtRecord, ...prev.customerDebts] : prev.customerDebts,
-      items: prev.items.map(it => {
-        const cartItem = state.cart.find(ci => ci.item.id === it.id);
-        if (cartItem && (it.type === 'product' || !it.is_service)) {
-          return { ...it, quantity: Math.max(0, Number(it.quantity) - Number(cartItem.quantity)) };
-        }
-        return it;
-      })
-    }));
+      const saleItemsData = state.cart.map(c => ({
+        sale_id: saleData.id,
+        item_id: c.item.id,
+        item_name: c.item.name,
+        quantity: Number(c.quantity) || 1,
+        cost_price: Number(c.item.cost_price) || 0,
+        sell_price: Number(c.item.sell_price) || 0,
+        line_total: Number(c.line_total) || 0,
+      }));
+      const { error: itemsError } = await apiClient.from('sale_items').insert(saleItemsData as any);
+      if (itemsError) {
+        console.error("Sale items insertion error:", itemsError);
+        throw new Error(itemsError.message || "Failed to record sale items in database");
+      }
 
-    try {
-      await loadStoreData(storeId);
-    } catch (e) {
-      console.warn("Background sync warning:", e);
-    }
+      // Run stock deductions, payment creation, and debt creation in parallel for rapid checkout
+      const stockUpdatePromises = state.cart
+        .filter(c => c.item.type === 'product' || !c.item.is_service)
+        .map(c => {
+          const newQty = Math.max(0, Number(c.item.quantity) - Number(c.quantity));
+          return apiClient.from('items').update({ quantity: newQty } as any).eq('id', c.item.id);
+        });
 
-    return sale;
+      const paymentPromise = paidAmount > 0
+        ? (async () => {
+          const paymentPayload = {
+            store_id: storeId,
+            sale_id: sale.id,
+            customer_id: customerId || null,
+            payment_type: 'sale',
+            direction: 'in',
+            method: saleType === 'cash' ? 'cash' : (outstanding > 0 ? 'partial_cash' : 'split_payment'),
+            payment_account_id: paymentAccountId || null,
+            amount: paidAmount,
+            reference: receiptNo,
+            created_by: userId,
+          };
+          const { data: pData, error: pError } = await apiClient.from('payments').insert(paymentPayload as any).select().single();
+          if (pError) console.error("Payment record error:", pError);
+          return (pData || paymentPayload) as unknown as Payment;
+        })()
+        : Promise.resolve(null);
+
+      const debtPromise = (outstanding > 0 && customerId)
+        ? (async () => {
+          const customer = state.customers.find(c => c.id === customerId);
+          const debtPayload = {
+            store_id: storeId,
+            customer_id: customerId,
+            customer_name: customer?.name || '',
+            sale_id: sale.id,
+            original_amount: outstanding,
+            balance_amount: outstanding,
+            status: 'open',
+            notes: 'POS Sale Credit',
+          };
+          const { data: dData, error: dError } = await apiClient.from('customer_debts').insert(debtPayload as any).select().single();
+          if (dError) console.error("Customer debt record error:", dError);
+          return (dData || debtPayload) as unknown as CustomerDebt;
+        })()
+        : Promise.resolve(null);
+
+      const [, paymentRecord, debtRecord] = await Promise.all([
+        Promise.all(stockUpdatePromises),
+        paymentPromise,
+        debtPromise,
+      ]);
+
+      setState(prev => ({
+        ...prev,
+        cart: [],
+        sales: [sale, ...prev.sales.filter(s => s.id !== sale.id)],
+        saleItems: [...saleItemsData.map((si, idx) => ({ ...si, id: `si-${Date.now()}-${idx}` } as unknown as SaleItem)), ...prev.saleItems],
+        payments: paymentRecord ? [paymentRecord, ...prev.payments] : prev.payments,
+        customerDebts: debtRecord ? [debtRecord, ...prev.customerDebts] : prev.customerDebts,
+        items: prev.items.map(it => {
+          const cartItem = state.cart.find(ci => ci.item.id === it.id);
+          if (cartItem && (it.type === 'product' || !it.is_service)) {
+            return { ...it, quantity: Math.max(0, Number(it.quantity) - Number(cartItem.quantity)) };
+          }
+          return it;
+        })
+      }));
+
+      // Sync store data in background without blocking POS receipt navigation
+      loadStoreData(storeId).catch(e => {
+        console.warn("Background sync warning:", e);
+      });
+
+      return sale;
     } finally {
       setTimeout(() => { isCompletingSaleRef.current = false; }, 1000);
     }
@@ -950,66 +926,66 @@ export function AppProvider({ children }: { children: ReactNode }) {
         alert("Error recording payment: " + (error.message || String(error)));
         return;
       }
-    
-    if (payment.customer_id && payment.direction === 'in') {
-      let debtsToProcess: any[] = [];
-      if (specificDebtId) {
-        const { data: specificDebt } = await apiClient
-          .from('customer_debts')
-          .select('*')
-          .eq('id', specificDebtId)
-          .single();
-        if (specificDebt) {
-          debtsToProcess = [specificDebt];
-        }
-      }
 
-      if (debtsToProcess.length === 0) {
-        const { data: debts } = await apiClient
-          .from('customer_debts')
-          .select('*')
-          .eq('customer_id', payment.customer_id)
-          .neq('status', 'paid')
-          .order('created_at', { ascending: true });
-        debtsToProcess = debts || [];
-      }
-
-      let remaining = Number(payment.amount);
-      for (const debt of debtsToProcess) {
-        if (remaining <= 0) break;
-        const currentBal = Number(debt.balance_amount || 0);
-        const deduction = Math.min(remaining, currentBal);
-        const newBalance = Math.max(0, Math.round((currentBal - deduction) * 100) / 100);
-
-        await apiClient.from('customer_debts').update({
-          balance_amount: newBalance,
-          status: newBalance === 0 ? 'paid' : 'partial',
-        } as any).eq('id', debt.id);
-
-        if (debt.sale_id) {
-          const { data: currentSale } = await apiClient
-            .from('sales')
+      if (payment.customer_id && payment.direction === 'in') {
+        let debtsToProcess: any[] = [];
+        if (specificDebtId) {
+          const { data: specificDebt } = await apiClient
+            .from('customer_debts')
             .select('*')
-            .eq('id', debt.sale_id)
+            .eq('id', specificDebtId)
             .single();
-
-          if (currentSale) {
-            const currentOut = Number(currentSale.outstanding_amount || 0);
-            const currentPaid = Number(currentSale.paid_amount || 0);
-            const newOutstanding = Math.max(0, Math.round((currentOut - deduction) * 100) / 100);
-            const newPaid = Math.round((currentPaid + deduction) * 100) / 100;
-
-            await apiClient.from('sales').update({
-              outstanding_amount: newOutstanding,
-              paid_amount: newPaid,
-            } as any).eq('id', debt.sale_id);
+          if (specificDebt) {
+            debtsToProcess = [specificDebt];
           }
         }
 
-        remaining -= deduction;
+        if (debtsToProcess.length === 0) {
+          const { data: debts } = await apiClient
+            .from('customer_debts')
+            .select('*')
+            .eq('customer_id', payment.customer_id)
+            .neq('status', 'paid')
+            .order('created_at', { ascending: true });
+          debtsToProcess = debts || [];
+        }
+
+        let remaining = Number(payment.amount);
+        for (const debt of debtsToProcess) {
+          if (remaining <= 0) break;
+          const currentBal = Number(debt.balance_amount || 0);
+          const deduction = Math.min(remaining, currentBal);
+          const newBalance = Math.max(0, Math.round((currentBal - deduction) * 100) / 100);
+
+          await apiClient.from('customer_debts').update({
+            balance_amount: newBalance,
+            status: newBalance === 0 ? 'paid' : 'partial',
+          } as any).eq('id', debt.id);
+
+          if (debt.sale_id) {
+            const { data: currentSale } = await apiClient
+              .from('sales')
+              .select('*')
+              .eq('id', debt.sale_id)
+              .single();
+
+            if (currentSale) {
+              const currentOut = Number(currentSale.outstanding_amount || 0);
+              const currentPaid = Number(currentSale.paid_amount || 0);
+              const newOutstanding = Math.max(0, Math.round((currentOut - deduction) * 100) / 100);
+              const newPaid = Math.round((currentPaid + deduction) * 100) / 100;
+
+              await apiClient.from('sales').update({
+                outstanding_amount: newOutstanding,
+                paid_amount: newPaid,
+              } as any).eq('id', debt.sale_id);
+            }
+          }
+
+          remaining -= deduction;
+        }
       }
-    }
-    if (state.currentStore) await loadStoreData(state.currentStore.id);
+      if (state.currentStore) await loadStoreData(state.currentStore.id);
     } finally {
       setTimeout(() => { isRecordingPaymentRef.current = false; }, 1000);
     }
@@ -1019,7 +995,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const name = 'XSRF-TOKEN=';
     const decodedCookie = decodeURIComponent(document.cookie);
     const ca = decodedCookie.split(';');
-    for(let i = 0; i < ca.length; i++) {
+    for (let i = 0; i < ca.length; i++) {
       let c = ca[i];
       while (c.charAt(0) == ' ') { c = c.substring(1); }
       if (c.indexOf(name) == 0) return c.substring(name.length, c.length);
@@ -1035,7 +1011,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     isRecordingTransferRef.current = true;
 
     const storeId = state.currentStore?.id || '';
-    
+
     try {
       const res = await fetch('/api/rest/v1/process-transfer', {
         method: 'POST',
@@ -1074,7 +1050,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     isRecordingReturnRef.current = true;
 
     const storeId = state.currentStore?.id || '';
-    
+
     try {
       const res = await fetch('/api/rest/v1/process-return', {
         method: 'POST',
@@ -1131,7 +1107,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const err = await res.json();
         throw new Error(err.message || err.error || 'Failed to process purchase');
       }
-      
+
       if (state.currentStore) await loadStoreData(state.currentStore.id);
     } catch (e: any) {
       console.error(e);
@@ -1155,8 +1131,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       throw new Error(checkResult.reason);
     }
 
-      const storeWithOwner = { ...store, owner_user_id: userId };
-    
+    const storeWithOwner = { ...store, owner_user_id: userId };
+
     const { data, error } = await apiClient.from('stores').insert(storeWithOwner as any).select().single();
     if (error) {
       console.error('addStore error:', error);
@@ -1164,7 +1140,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
     if (data) {
       const newStore = data as unknown as Store;
-      
+
       // Owner-level license linking for additional stores
       if (state.stores.length > 0) {
         const { data: inheritResult, error: inheritError } = await apiClient.rpc('inherit_owner_license', {
@@ -1186,7 +1162,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
 
       localStorage.setItem('currentStoreId', newStore.id);
-      
+
       // Refresh license status for the new store
       let licenseStatus = state.licenseStatus;
       let storeFeatures = state.storeFeatures;
@@ -1204,10 +1180,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       } catch (e) {
         console.error('License refresh after store creation failed:', e);
       }
-      
-      setState(prev => ({ 
-        ...prev, 
-        stores: [...prev.stores, newStore], 
+
+      setState(prev => ({
+        ...prev,
+        stores: [...prev.stores, newStore],
         currentStore: newStore,
         licenseStatus,
         storeFeatures,
@@ -1220,7 +1196,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const deleteStore = useCallback(async (id: string): Promise<boolean> => {
     const userId = state.session?.user?.id;
     if (!userId) return false;
-    
+
     const storeToDelete = state.stores.find(s => s.id === id);
     if (!storeToDelete || storeToDelete.owner_user_id !== userId) {
       console.error('Cannot delete: not the owner');
@@ -1232,7 +1208,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       .from('stock_transfers')
       .select('id')
       .or(`source_store_id.eq.${id},destination_store_id.eq.${id}`);
-    
+
     if (transfers && transfers.length > 0) {
       const transferIds = transfers.map(t => t.id);
       await apiClient.from('stock_transfer_items').delete().in('stock_transfer_id', transferIds);
@@ -1243,7 +1219,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (salesData && salesData.length > 0) {
       const saleIds = salesData.map(s => s.id);
       await apiClient.from('sale_items').delete().in('sale_id', saleIds);
-      
+
       const { data: returnsData } = await apiClient.from('returns').select('id').eq('store_id', id);
       if (returnsData && returnsData.length > 0) {
         await apiClient.from('return_items').delete().in('return_id', returnsData.map(r => r.id));
@@ -1257,7 +1233,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       'payment_integrations', 'support_tickets', 'payment_sessions',
       'license_extensions', 'license_extension_logs', 'platform_payments'
     ];
-    
+
     for (const table of directTables) {
       await (apiClient.from(table as any).delete() as any).eq('store_id', id);
     }
@@ -1306,7 +1282,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         throw new Error(result.reason);
       }
     }
-    
+
     const token = localStorage.getItem('access_token');
     const res = await fetch('/api/auth/v1/create-staff', {
       method: 'POST',
@@ -1441,7 +1417,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       addCategory, updateCategory, deleteCategory, recordPurchase,
     }}>
       {state.currentStore?.primary_color && (
-        <style dangerouslySetInnerHTML={{__html: `
+        <style dangerouslySetInnerHTML={{
+          __html: `
           :root {
             --color-primary: ${state.currentStore.primary_color};
             --color-secondary: ${state.currentStore.secondary_color || state.currentStore.primary_color};

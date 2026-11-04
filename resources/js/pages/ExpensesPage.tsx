@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { toast } from 'sonner';
 import { useApp } from '@/context/AppContext';
 import { api as apiClient } from '@/api';
@@ -22,7 +22,7 @@ import { SearchableSelect } from '@/components/ui/searchable-select';
 
 export default function ExpensesPage() {
   const { expenses, addExpense, refundExpense, updateExpense, deleteExpense, currentStore, formatCurrency, user } = useApp();
-  
+
   // Modals & form state
   const [showForm, setShowForm] = useState(false);
   const [type, setType] = useState('');
@@ -102,24 +102,29 @@ export default function ExpensesPage() {
     return d.toDateString() === now.toDateString();
   };
 
-  // Base date-filtered expenses for current store
-  const storeExpensesInPeriod = expenses.filter(
-    e => e.store_id === currentStore?.id && filterByDate(e.created_at)
-  );
-
-  // Active (non-reversed) expenses count towards operating costs
-  const activeExpenses = storeExpensesInPeriod.filter(e => e.status !== 'reversed');
-  const reversedExpenses = storeExpensesInPeriod.filter(e => e.status === 'reversed');
-
-  const activeTotal = activeExpenses.reduce((s, e) => s + e.amount, 0);
-  const reversedTotal = reversedExpenses.reduce((s, e) => s + Number(e.refund_amount || e.amount), 0);
-
-  // Visible items based on status filter
-  const displayedExpenses = statusFilter === 'active'
-    ? activeExpenses
-    : statusFilter === 'reversed'
-      ? reversedExpenses
-      : storeExpensesInPeriod;
+  // Base date-filtered expenses for current store (memoized)
+  const { storeExpensesInPeriod, activeExpenses, reversedExpenses, activeTotal, reversedTotal, displayedExpenses } = useMemo(() => {
+    const inPeriod = expenses.filter(
+      e => e.store_id === currentStore?.id && filterByDate(e.created_at)
+    );
+    const active = inPeriod.filter(e => e.status !== 'reversed');
+    const reversed = inPeriod.filter(e => e.status === 'reversed');
+    const actTotal = active.reduce((s, e) => s + e.amount, 0);
+    const revTotal = reversed.reduce((s, e) => s + Number(e.refund_amount || e.amount), 0);
+    const displayed = statusFilter === 'active'
+      ? active
+      : statusFilter === 'reversed'
+        ? reversed
+        : inPeriod;
+    return {
+      storeExpensesInPeriod: inPeriod,
+      activeExpenses: active,
+      reversedExpenses: reversed,
+      activeTotal: actTotal,
+      reversedTotal: revTotal,
+      displayedExpenses: displayed,
+    };
+  }, [expenses, currentStore?.id, tab, fromDate, toDate, statusFilter]);
 
   // --------------------------------------------------------------------------
   // Handlers
@@ -179,7 +184,7 @@ export default function ExpensesPage() {
     if (!refundTarget || isSubmittingRefund) return;
     setIsSubmittingRefund(true);
     try {
-      const finalReason = refundReason === 'Custom' 
+      const finalReason = refundReason === 'Custom'
         ? refundCustomReason.trim() || 'Service canceled and refunded'
         : refundReason;
 
@@ -264,8 +269,8 @@ export default function ExpensesPage() {
 
   return (
     <div className="min-h-screen bg-[#F8F9FA] dark:bg-background pb-12">
-      <PageHeader 
-        title="Expenses" 
+      <PageHeader
+        title="Expenses"
         rightAction={
           <div className="flex flex-col sm:flex-row items-end sm:items-center gap-4">
             <div className="flex flex-col sm:flex-row items-center gap-4">
@@ -275,28 +280,27 @@ export default function ExpensesPage() {
                     key={t}
                     type="button"
                     onClick={() => setTab(t)}
-                    className={`flex-1 sm:flex-none px-4 py-2 rounded-lg text-sm font-semibold capitalize transition-all duration-200 ${
-                      tab === t 
-                        ? 'bg-background shadow-sm text-foreground' 
+                    className={`flex-1 sm:flex-none px-4 py-2 rounded-lg text-sm font-semibold capitalize transition-all duration-200 ${tab === t
+                        ? 'bg-background shadow-sm text-foreground'
                         : 'text-muted-foreground hover:text-foreground hover:bg-muted'
-                    }`}
+                      }`}
                   >
                     {t === 'today' ? 'Today' : t === 'month' ? 'This Month' : t === 'all' ? 'All Time' : 'Custom'}
                   </button>
                 ))}
               </div>
-              
+
               {tab === 'custom' && (
                 <div className="flex items-center gap-2">
-                  <input 
-                    type="date" 
+                  <input
+                    type="date"
                     value={fromDate}
                     onChange={e => setFromDate(e.target.value)}
                     className="px-3 py-2 bg-card border border-border rounded-lg text-sm focus:ring-2 focus:ring-primary/20 outline-none"
                   />
                   <span className="text-muted-foreground text-sm">to</span>
-                  <input 
-                    type="date" 
+                  <input
+                    type="date"
                     value={toDate}
                     onChange={e => setToDate(e.target.value)}
                     className="px-3 py-2 bg-card border border-border rounded-lg text-sm focus:ring-2 focus:ring-primary/20 outline-none"
@@ -304,8 +308,8 @@ export default function ExpensesPage() {
                 </div>
               )}
             </div>
-            
-            <button 
+
+            <button
               type="button"
               onClick={() => setShowForm(true)}
               className="flex items-center justify-center gap-2 px-5 py-2.5 bg-primary text-primary-foreground rounded-xl text-sm font-bold hover:bg-primary/90 transition-all shadow-sm w-full sm:w-auto"
@@ -316,16 +320,16 @@ export default function ExpensesPage() {
           </div>
         }
       />
-      
+
       <div className="p-4 sm:p-6 md:px-8 space-y-6 max-w-7xl mx-auto w-full">
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-          
+
           {/* Summary Cards Column */}
           <div className="lg:col-span-1 lg:order-2 space-y-4">
             {/* Active Expenses Card */}
             <div className="bg-card border border-border rounded-3xl p-6 text-center shadow-sm flex flex-col justify-center items-center">
               <div className="w-12 h-12 rounded-full bg-destructive/10 text-destructive flex items-center justify-center mb-3">
-                 <Wallet size={24} />
+                <Wallet size={24} />
               </div>
               <p className="text-xs font-bold text-muted-foreground capitalize tracking-widest mb-1">Net Operating Expenses</p>
               <p className="text-3xl sm:text-4xl font-black text-foreground">{formatCurrency(activeTotal)}</p>
@@ -336,7 +340,7 @@ export default function ExpensesPage() {
             {reversedTotal > 0 && (
               <div className="bg-amber-500/5 border border-amber-500/20 rounded-3xl p-6 text-center shadow-sm flex flex-col justify-center items-center animate-in fade-in">
                 <div className="w-12 h-12 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center mb-3">
-                   <RotateCcw size={22} />
+                  <RotateCcw size={22} />
                 </div>
                 <p className="text-xs font-bold text-amber-700 dark:text-amber-400 capitalize tracking-widest mb-1">Reversed & Refunded</p>
                 <p className="text-3xl font-black text-amber-600 dark:text-amber-400">+{formatCurrency(reversedTotal)}</p>
@@ -347,7 +351,7 @@ export default function ExpensesPage() {
 
           {/* Main Table Column */}
           <div className="lg:col-span-3 lg:order-1 space-y-4">
-            
+
             {/* Status Filter Tabs */}
             <div className="flex items-center justify-between gap-3 bg-card border border-border/70 p-2 rounded-2xl shadow-2xs">
               <div className="flex items-center gap-1.5">
@@ -356,11 +360,10 @@ export default function ExpensesPage() {
                     key={st}
                     type="button"
                     onClick={() => setStatusFilter(st)}
-                    className={`px-3.5 py-1.5 rounded-xl text-xs font-bold capitalize transition-all ${
-                      statusFilter === st
+                    className={`px-3.5 py-1.5 rounded-xl text-xs font-bold capitalize transition-all ${statusFilter === st
                         ? 'bg-primary text-primary-foreground shadow-2xs'
                         : 'text-muted-foreground hover:text-foreground hover:bg-muted'
-                    }`}
+                      }`}
                   >
                     {st === 'all' ? `All (${storeExpensesInPeriod.length})` : st === 'active' ? `Active (${activeExpenses.length})` : `Reversed (${reversedExpenses.length})`}
                   </button>
@@ -369,26 +372,26 @@ export default function ExpensesPage() {
             </div>
 
             {displayedExpenses.length === 0 ? (
-               <div className="bg-card rounded-3xl border border-border p-16 text-center shadow-sm flex flex-col items-center">
-                 <div className="w-20 h-20 rounded-full bg-muted/50 flex items-center justify-center mb-6">
-                   <Receipt size={32} className="text-muted-foreground/50" />
-                 </div>
-                 <h3 className="text-xl font-bold text-foreground mb-2 capitalize">No expenses found</h3>
-                 <p className="text-muted-foreground text-sm max-w-sm">
-                   {statusFilter === 'reversed' 
-                     ? 'No reversed or canceled expenses in this time period.' 
-                     : 'Keep track of your operational costs by recording expenses here.'}
-                 </p>
-                 {statusFilter !== 'reversed' && (
-                   <button 
-                      type="button"
-                      onClick={() => setShowForm(true)}
-                      className="mt-6 px-6 py-2.5 bg-primary text-primary-foreground rounded-xl text-sm font-bold shadow-sm"
-                    >
-                      Add Expense
-                    </button>
-                 )}
-               </div>
+              <div className="bg-card rounded-3xl border border-border p-16 text-center shadow-sm flex flex-col items-center">
+                <div className="w-20 h-20 rounded-full bg-muted/50 flex items-center justify-center mb-6">
+                  <Receipt size={32} className="text-muted-foreground/50" />
+                </div>
+                <h3 className="text-xl font-bold text-foreground mb-2 capitalize">No expenses found</h3>
+                <p className="text-muted-foreground text-sm max-w-sm">
+                  {statusFilter === 'reversed'
+                    ? 'No reversed or canceled expenses in this time period.'
+                    : 'Keep track of your operational costs by recording expenses here.'}
+                </p>
+                {statusFilter !== 'reversed' && (
+                  <button
+                    type="button"
+                    onClick={() => setShowForm(true)}
+                    className="mt-6 px-6 py-2.5 bg-primary text-primary-foreground rounded-xl text-sm font-bold shadow-sm"
+                  >
+                    Add Expense
+                  </button>
+                )}
+              </div>
             ) : (
               <>
                 <div className="hidden md:block bg-card rounded-2xl border border-border shadow-sm overflow-hidden">
@@ -411,24 +414,24 @@ export default function ExpensesPage() {
                         return (
                           <tr key={exp.id} className={`hover:bg-muted/30 transition-colors ${isReversed ? 'bg-amber-500/5' : ''}`}>
                             <td className="px-5 py-4">
-                               <div className="flex flex-col">
-                                  <div className="flex items-center gap-2">
-                                    <span className={`font-bold text-sm ${isReversed ? 'line-through text-muted-foreground' : 'text-foreground'}`}>
-                                      {exp.expense_type}
-                                    </span>
-                                    {isReversed && (
-                                      <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-700 dark:text-amber-400 bg-amber-500/15 border border-amber-500/30 px-2 py-0.5 rounded-full">
-                                        <RotateCcw size={10} /> Reversed
-                                      </span>
-                                    )}
-                                  </div>
-                                  {exp.note && <span className="text-xs text-muted-foreground mt-0.5">{exp.note}</span>}
-                                  {isReversed && exp.refund_reason && (
-                                    <span className="text-xs text-amber-700/80 dark:text-amber-400/80 mt-1 flex items-center gap-1 italic">
-                                      Reason: {exp.refund_reason}
+                              <div className="flex flex-col">
+                                <div className="flex items-center gap-2">
+                                  <span className={`font-bold text-sm ${isReversed ? 'line-through text-muted-foreground' : 'text-foreground'}`}>
+                                    {exp.expense_type}
+                                  </span>
+                                  {isReversed && (
+                                    <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-700 dark:text-amber-400 bg-amber-500/15 border border-amber-500/30 px-2 py-0.5 rounded-full">
+                                      <RotateCcw size={10} /> Reversed
                                     </span>
                                   )}
-                               </div>
+                                </div>
+                                {exp.note && <span className="text-xs text-muted-foreground mt-0.5">{exp.note}</span>}
+                                {isReversed && exp.refund_reason && (
+                                  <span className="text-xs text-amber-700/80 dark:text-amber-400/80 mt-1 flex items-center gap-1 italic">
+                                    Reason: {exp.refund_reason}
+                                  </span>
+                                )}
+                              </div>
                             </td>
 
                             <td className="px-5 py-4 text-xs font-semibold text-muted-foreground">
@@ -442,12 +445,12 @@ export default function ExpensesPage() {
                             </td>
 
                             <td className="px-5 py-4 text-sm font-medium text-foreground">
-                               <div className="flex items-center gap-2">
-                                  <div className="w-6 h-6 rounded-full bg-primary/10 text-primary flex items-center justify-center text-[10px] font-bold">
-                                     {exp.employee_name ? exp.employee_name.charAt(0).toUpperCase() : 'U'}
-                                  </div>
-                                  <span className="truncate max-w-[120px]">{exp.employee_name || 'Staff'}</span>
-                               </div>
+                              <div className="flex items-center gap-2">
+                                <div className="w-6 h-6 rounded-full bg-primary/10 text-primary flex items-center justify-center text-[10px] font-bold">
+                                  {exp.employee_name ? exp.employee_name.charAt(0).toUpperCase() : 'U'}
+                                </div>
+                                <span className="truncate max-w-[120px]">{exp.employee_name || 'Staff'}</span>
+                              </div>
                             </td>
 
                             <td className="px-5 py-4 text-sm font-bold text-right whitespace-nowrap">
@@ -533,98 +536,98 @@ export default function ExpensesPage() {
 
                     return (
                       <div key={exp.id} className={`bg-card rounded-2xl border border-border p-5 shadow-sm space-y-3 ${isReversed ? 'bg-amber-500/5 border-amber-500/30' : ''}`}>
-                         <div className="flex justify-between items-start">
-                           <div>
-                              <div className="flex items-center gap-2">
-                                <h4 className={`font-bold text-base leading-tight capitalize ${isReversed ? 'line-through text-muted-foreground' : 'text-foreground'}`}>
-                                  {exp.expense_type}
-                                </h4>
-                                {isReversed && (
-                                  <span className="text-[10px] font-bold text-amber-700 dark:text-amber-400 bg-amber-500/15 border border-amber-500/30 px-2 py-0.5 rounded-full">
-                                    Reversed
-                                  </span>
-                                )}
-                              </div>
-                              {exp.note && <span className="text-xs text-muted-foreground mt-1 inline-block">{exp.note}</span>}
-                              {isReversed && exp.refund_reason && (
-                                <p className="text-xs text-amber-700/80 dark:text-amber-400/80 mt-1 italic">
-                                  Reason: {exp.refund_reason}
-                                </p>
+                        <div className="flex justify-between items-start">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <h4 className={`font-bold text-base leading-tight capitalize ${isReversed ? 'line-through text-muted-foreground' : 'text-foreground'}`}>
+                                {exp.expense_type}
+                              </h4>
+                              {isReversed && (
+                                <span className="text-[10px] font-bold text-amber-700 dark:text-amber-400 bg-amber-500/15 border border-amber-500/30 px-2 py-0.5 rounded-full">
+                                  Reversed
+                                </span>
                               )}
-                           </div>
-                           <div className="text-right">
-                             {isReversed ? (
-                               <div>
-                                 <span className="line-through text-xs text-muted-foreground block">{formatCurrency(exp.amount)}</span>
-                                 <span className="font-black text-amber-600 dark:text-amber-400 text-sm">+{formatCurrency(Number(exp.refund_amount || exp.amount))}</span>
-                               </div>
-                             ) : (
-                               <span className="font-black text-destructive text-base">{formatCurrency(exp.amount)}</span>
-                             )}
-                           </div>
-                         </div>
-
-                         <div className="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-border/50 text-xs text-muted-foreground font-medium">
-                            <div className="flex items-center gap-3">
-                               <div className="flex items-center gap-1">
-                                  <Clock size={13} className="opacity-70" />
-                                  {new Date(exp.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                </div>
-                                <div className="flex items-center gap-1">
-                                  <User size={13} className="opacity-70" />
-                                  {exp.employee_name || 'Staff'}
-                                </div>
                             </div>
-                            <span className="px-2 py-0.5 rounded bg-muted text-[11px] font-semibold">
-                              {getAccountName(exp.payment_account_id)}
-                            </span>
-                         </div>
+                            {exp.note && <span className="text-xs text-muted-foreground mt-1 inline-block">{exp.note}</span>}
+                            {isReversed && exp.refund_reason && (
+                              <p className="text-xs text-amber-700/80 dark:text-amber-400/80 mt-1 italic">
+                                Reason: {exp.refund_reason}
+                              </p>
+                            )}
+                          </div>
+                          <div className="text-right">
+                            {isReversed ? (
+                              <div>
+                                <span className="line-through text-xs text-muted-foreground block">{formatCurrency(exp.amount)}</span>
+                                <span className="font-black text-amber-600 dark:text-amber-400 text-sm">+{formatCurrency(Number(exp.refund_amount || exp.amount))}</span>
+                              </div>
+                            ) : (
+                              <span className="font-black text-destructive text-base">{formatCurrency(exp.amount)}</span>
+                            )}
+                          </div>
+                        </div>
 
-                         {/* Mobile Actions */}
-                         <div className="flex items-center justify-end gap-2 pt-2 border-t border-border/40">
-                           {!isReversed ? (
-                             <>
-                               {isOwnerOrAdmin ? (
-                                 <>
-                                   <button
-                                     type="button"
-                                     onClick={() => openRefundModal(exp)}
-                                     className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-amber-700 dark:text-amber-400 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30"
-                                   >
-                                     <RotateCcw size={12} /> Refund / Reverse
-                                   </button>
+                        <div className="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-border/50 text-xs text-muted-foreground font-medium">
+                          <div className="flex items-center gap-3">
+                            <div className="flex items-center gap-1">
+                              <Clock size={13} className="opacity-70" />
+                              {new Date(exp.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <User size={13} className="opacity-70" />
+                              {exp.employee_name || 'Staff'}
+                            </div>
+                          </div>
+                          <span className="px-2 py-0.5 rounded bg-muted text-[11px] font-semibold">
+                            {getAccountName(exp.payment_account_id)}
+                          </span>
+                        </div>
 
-                                   <button
-                                     type="button"
-                                     onClick={() => openEditModal(exp)}
-                                     className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted"
-                                   >
-                                     <Pencil size={14} />
-                                   </button>
-                                   <button
-                                     type="button"
-                                     onClick={() => openDeleteModal(exp)}
-                                     className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-                                   >
-                                     <Trash2 size={14} />
-                                   </button>
-                                 </>
-                               ) : (
-                                 <span className="text-xs text-muted-foreground/60 italic">
-                                   Recorded
-                                 </span>
-                               )}
-                             </>
-                           ) : (
-                             <button
-                               type="button"
-                               onClick={() => setViewAuditTarget(exp)}
-                               className="text-xs font-semibold text-muted-foreground flex items-center gap-1 py-1 px-2.5 rounded bg-muted"
-                             >
-                               <Info size={12} /> Audit Info
-                             </button>
-                           )}
-                         </div>
+                        {/* Mobile Actions */}
+                        <div className="flex items-center justify-end gap-2 pt-2 border-t border-border/40">
+                          {!isReversed ? (
+                            <>
+                              {isOwnerOrAdmin ? (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => openRefundModal(exp)}
+                                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-amber-700 dark:text-amber-400 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30"
+                                  >
+                                    <RotateCcw size={12} /> Refund / Reverse
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => openEditModal(exp)}
+                                    className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted"
+                                  >
+                                    <Pencil size={14} />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => openDeleteModal(exp)}
+                                    className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                                  >
+                                    <Trash2 size={14} />
+                                  </button>
+                                </>
+                              ) : (
+                                <span className="text-xs text-muted-foreground/60 italic">
+                                  Recorded
+                                </span>
+                              )}
+                            </>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => setViewAuditTarget(exp)}
+                              className="text-xs font-semibold text-muted-foreground flex items-center gap-1 py-1 px-2.5 rounded bg-muted"
+                            >
+                              <Info size={12} /> Audit Info
+                            </button>
+                          )}
+                        </div>
                       </div>
                     );
                   })}
@@ -643,7 +646,7 @@ export default function ExpensesPage() {
           <div className="w-full max-w-md bg-card rounded-2xl sm:rounded-3xl border border-border shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
             <div className="flex justify-between items-center px-6 py-5 border-b border-border bg-muted/10">
               <h3 className="text-xl font-bold text-foreground capitalize">Add Expense</h3>
-              <button 
+              <button
                 type="button"
                 onClick={() => setShowForm(false)}
                 className="w-8 h-8 rounded-full bg-background border border-border flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
@@ -651,38 +654,38 @@ export default function ExpensesPage() {
                 <X size={16} />
               </button>
             </div>
-            
+
             <form onSubmit={handleAdd} className="p-6 sm:p-8 space-y-5">
               <div>
                 <label className="block text-xs font-bold text-muted-foreground capitalize tracking-wider mb-2">Expense Type <span className="text-destructive">*</span></label>
-                <input 
-                  value={type} 
-                  onChange={e => setType(e.target.value)} 
+                <input
+                  value={type}
+                  onChange={e => setType(e.target.value)}
                   placeholder="e.g., Transport, Errand, Meals, Supplies"
-                  className="w-full px-4 py-2 h-11 rounded-xl border border-input bg-background text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary shadow-sm transition-all" 
-                  required 
+                  className="w-full px-4 py-2 h-11 rounded-xl border border-input bg-background text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary shadow-sm transition-all"
+                  required
                 />
               </div>
 
               <div>
                 <label className="block text-xs font-bold text-muted-foreground capitalize tracking-wider mb-2">Amount <span className="text-destructive">*</span></label>
-                <input 
-                  type="number" 
+                <input
+                  type="number"
                   step="0.01"
                   min="0.01"
-                  value={amount} 
-                  onChange={e => setAmount(e.target.value)} 
+                  value={amount}
+                  onChange={e => setAmount(e.target.value)}
                   placeholder="0.00"
-                  className="w-full px-4 py-2 h-11 rounded-xl border border-input bg-background text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary shadow-sm transition-all" 
-                  required 
+                  className="w-full px-4 py-2 h-11 rounded-xl border border-input bg-background text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary shadow-sm transition-all"
+                  required
                 />
               </div>
 
               {paymentAccounts.length > 0 ? (
                 <div>
                   <label className="block text-xs font-bold text-muted-foreground capitalize tracking-wider mb-2">Payment Account</label>
-                  <SearchableSelect 
-                    value={paymentAccountId || ''} 
+                  <SearchableSelect
+                    value={paymentAccountId || ''}
                     onChange={setPaymentAccountId}
                     options={paymentAccounts.map(pa => ({
                       value: pa.id,
@@ -695,8 +698,8 @@ export default function ExpensesPage() {
               ) : (
                 <div>
                   <label className="block text-xs font-bold text-muted-foreground capitalize tracking-wider mb-2">Payment Method</label>
-                  <select 
-                    value={method} 
+                  <select
+                    value={method}
                     onChange={e => setMethod(e.target.value)}
                     className="w-full px-4 py-2 h-11 rounded-xl border border-input bg-background text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary shadow-sm transition-all appearance-none"
                   >
@@ -709,24 +712,24 @@ export default function ExpensesPage() {
 
               <div>
                 <label className="block text-xs font-bold text-muted-foreground capitalize tracking-wider mb-2">Note <span className="lowercase font-medium">(optional)</span></label>
-                <input 
-                  value={note} 
-                  onChange={e => setNote(e.target.value)} 
+                <input
+                  value={note}
+                  onChange={e => setNote(e.target.value)}
                   placeholder="e.g., Motorbike errand to post office"
-                  className="w-full px-4 py-2 h-11 rounded-xl border border-input bg-background text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary shadow-sm transition-all" 
+                  className="w-full px-4 py-2 h-11 rounded-xl border border-input bg-background text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary shadow-sm transition-all"
                 />
               </div>
 
               <div className="flex gap-3 pt-6 border-t border-border mt-8">
-                <button 
-                  type="button" 
-                  onClick={() => setShowForm(false)} 
+                <button
+                  type="button"
+                  onClick={() => setShowForm(false)}
                   className="flex-1 py-3 rounded-xl bg-muted text-foreground text-sm font-bold hover:bg-accent transition-colors"
                 >
                   Cancel
                 </button>
-                <button 
-                  type="submit" 
+                <button
+                  type="submit"
                   data-submit-guard="true"
                   disabled={isSubmitting}
                   className="flex-1 py-3 rounded-xl bg-primary text-primary-foreground text-sm font-bold shadow-sm hover:opacity-90 transition-opacity capitalize disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
@@ -762,7 +765,7 @@ export default function ExpensesPage() {
                   <p className="text-xs text-muted-foreground">Credit cash back to store account & adjust expense logs</p>
                 </div>
               </div>
-              <button 
+              <button
                 type="button"
                 onClick={() => setRefundTarget(null)}
                 className="w-8 h-8 rounded-full bg-background border border-border flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
@@ -770,7 +773,7 @@ export default function ExpensesPage() {
                 <X size={16} />
               </button>
             </div>
-            
+
             <form onSubmit={handleConfirmRefund} className="p-6 sm:p-8 space-y-5">
               {/* Target Expense Summary Card */}
               <div className="bg-muted/40 rounded-2xl p-4 border border-border/60 flex items-center justify-between">
@@ -800,15 +803,15 @@ export default function ExpensesPage() {
                   </button>
                 </div>
                 <div className="relative flex items-center">
-                  <input 
-                    type="number" 
+                  <input
+                    type="number"
                     step="0.01"
                     min="0.01"
                     max={refundTarget.amount}
-                    value={refundAmount} 
-                    onChange={e => setRefundAmount(e.target.value)} 
-                    className="w-full px-4 py-2 h-11 rounded-xl border border-input bg-background text-sm font-black text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary shadow-sm transition-all" 
-                    required 
+                    value={refundAmount}
+                    onChange={e => setRefundAmount(e.target.value)}
+                    className="w-full px-4 py-2 h-11 rounded-xl border border-input bg-background text-sm font-black text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary shadow-sm transition-all"
+                    required
                   />
                 </div>
                 <p className="text-[11px] text-muted-foreground mt-1">
@@ -821,8 +824,8 @@ export default function ExpensesPage() {
                 <label className="block text-xs font-bold text-muted-foreground capitalize tracking-wider mb-2">
                   Credit Refund Into Account <span className="text-destructive">*</span>
                 </label>
-                <SearchableSelect 
-                  value={refundAccountId || ''} 
+                <SearchableSelect
+                  value={refundAccountId || ''}
                   onChange={setRefundAccountId}
                   options={paymentAccounts.map(pa => ({
                     value: pa.id,
@@ -851,11 +854,10 @@ export default function ExpensesPage() {
                       key={r}
                       type="button"
                       onClick={() => setRefundReason(r)}
-                      className={`px-3 py-2 rounded-xl text-xs font-bold text-left transition-all border ${
-                        refundReason === r 
-                          ? 'bg-primary/10 border-primary text-primary shadow-2xs' 
+                      className={`px-3 py-2 rounded-xl text-xs font-bold text-left transition-all border ${refundReason === r
+                          ? 'bg-primary/10 border-primary text-primary shadow-2xs'
                           : 'bg-muted/40 border-border/60 text-muted-foreground hover:bg-muted'
-                      }`}
+                        }`}
                     >
                       {r}
                     </button>
@@ -874,15 +876,15 @@ export default function ExpensesPage() {
               </div>
 
               <div className="flex gap-3 pt-6 border-t border-border mt-8">
-                <button 
-                  type="button" 
-                  onClick={() => setRefundTarget(null)} 
+                <button
+                  type="button"
+                  onClick={() => setRefundTarget(null)}
                   className="flex-1 py-3 rounded-xl bg-muted text-foreground text-sm font-bold hover:bg-accent transition-colors"
                 >
                   Cancel
                 </button>
-                <button 
-                  type="submit" 
+                <button
+                  type="submit"
                   data-submit-guard="true"
                   disabled={isSubmittingRefund}
                   className="flex-1 py-3 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-sm font-bold shadow-sm transition-colors flex items-center justify-center gap-2"
@@ -913,7 +915,7 @@ export default function ExpensesPage() {
           <div className="w-full max-w-md bg-card rounded-2xl sm:rounded-3xl border border-border shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
             <div className="flex justify-between items-center px-6 py-5 border-b border-border bg-muted/10">
               <h3 className="text-xl font-bold text-foreground capitalize">Edit Expense</h3>
-              <button 
+              <button
                 type="button"
                 onClick={() => setEditTarget(null)}
                 className="w-8 h-8 rounded-full bg-background border border-border flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
@@ -921,36 +923,36 @@ export default function ExpensesPage() {
                 <X size={16} />
               </button>
             </div>
-            
+
             <form onSubmit={handleConfirmEdit} className="p-6 sm:p-8 space-y-5">
               <div>
                 <label className="block text-xs font-bold text-muted-foreground capitalize tracking-wider mb-2">Expense Type <span className="text-destructive">*</span></label>
-                <input 
-                  value={editType} 
-                  onChange={e => setEditType(e.target.value)} 
-                  className="w-full px-4 py-2 h-11 rounded-xl border border-input bg-background text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary shadow-sm transition-all" 
-                  required 
+                <input
+                  value={editType}
+                  onChange={e => setEditType(e.target.value)}
+                  className="w-full px-4 py-2 h-11 rounded-xl border border-input bg-background text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary shadow-sm transition-all"
+                  required
                 />
               </div>
 
               <div>
                 <label className="block text-xs font-bold text-muted-foreground capitalize tracking-wider mb-2">Amount <span className="text-destructive">*</span></label>
-                <input 
-                  type="number" 
+                <input
+                  type="number"
                   step="0.01"
                   min="0.01"
-                  value={editAmount} 
-                  onChange={e => setEditAmount(e.target.value)} 
-                  className="w-full px-4 py-2 h-11 rounded-xl border border-input bg-background text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary shadow-sm transition-all" 
-                  required 
+                  value={editAmount}
+                  onChange={e => setEditAmount(e.target.value)}
+                  className="w-full px-4 py-2 h-11 rounded-xl border border-input bg-background text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary shadow-sm transition-all"
+                  required
                 />
               </div>
 
               {paymentAccounts.length > 0 && (
                 <div>
                   <label className="block text-xs font-bold text-muted-foreground capitalize tracking-wider mb-2">Payment Account</label>
-                  <SearchableSelect 
-                    value={editAccountId || ''} 
+                  <SearchableSelect
+                    value={editAccountId || ''}
                     onChange={setEditAccountId}
                     options={paymentAccounts.map(pa => ({
                       value: pa.id,
@@ -964,23 +966,23 @@ export default function ExpensesPage() {
 
               <div>
                 <label className="block text-xs font-bold text-muted-foreground capitalize tracking-wider mb-2">Note <span className="lowercase font-medium">(optional)</span></label>
-                <input 
-                  value={editNote} 
-                  onChange={e => setEditNote(e.target.value)} 
-                  className="w-full px-4 py-2 h-11 rounded-xl border border-input bg-background text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary shadow-sm transition-all" 
+                <input
+                  value={editNote}
+                  onChange={e => setEditNote(e.target.value)}
+                  className="w-full px-4 py-2 h-11 rounded-xl border border-input bg-background text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary shadow-sm transition-all"
                 />
               </div>
 
               <div className="flex gap-3 pt-6 border-t border-border mt-8">
-                <button 
-                  type="button" 
-                  onClick={() => setEditTarget(null)} 
+                <button
+                  type="button"
+                  onClick={() => setEditTarget(null)}
                   className="flex-1 py-3 rounded-xl bg-muted text-foreground text-sm font-bold hover:bg-accent transition-colors"
                 >
                   Cancel
                 </button>
-                <button 
-                  type="submit" 
+                <button
+                  type="submit"
                   data-submit-guard="true"
                   disabled={isSubmittingEdit}
                   className="flex-1 py-3 rounded-xl bg-primary text-primary-foreground text-sm font-bold shadow-sm hover:opacity-90 transition-opacity capitalize disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
@@ -1043,7 +1045,7 @@ export default function ExpensesPage() {
                 <RotateCcw size={18} className="text-amber-600 dark:text-amber-400" />
                 <h3 className="text-lg font-black text-foreground capitalize">Reversal Audit Trail</h3>
               </div>
-              <button 
+              <button
                 type="button"
                 onClick={() => setViewAuditTarget(null)}
                 className="w-8 h-8 rounded-full bg-background border border-border flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"

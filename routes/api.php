@@ -20,21 +20,7 @@ Route::post('/auth/v1/logout', [AuthController::class, 'logout'])->middleware('a
 
 // Public endpoint to retrieve system-wide branding (name, logo, favicon)
 Route::get('/system-branding', function () {
-    try {
-        $rows = \App\Models\SystemSetting::whereIn('setting_key', ['platform_name', 'system_logo', 'system_favicon'])
-            ->pluck('setting_value', 'setting_key');
-        return response()->json([
-            'platform_name' => !empty($rows['platform_name']) ? $rows['platform_name'] : config('app.name', 'Nasri Account System'),
-            'system_logo' => $rows['system_logo'] ?? '',
-            'system_favicon' => $rows['system_favicon'] ?? '',
-        ]);
-    } catch (\Exception $e) {
-        return response()->json([
-            'platform_name' => config('app.name', 'Nasri Account System'),
-            'system_logo' => '',
-            'system_favicon' => '',
-        ]);
-    }
+    return response()->json(\App\Support\AccessCache::getSystemBranding());
 });
 
 // ============================================================
@@ -43,47 +29,19 @@ Route::get('/system-branding', function () {
 
 Route::middleware(['auth:sanctum'])->group(function () {
 
-    // Returns current user profile + computed role
+    // Returns current user profile + computed role (cached)
     Route::get('/user', function (Request $request) {
         $user = $request->user();
-        
-        $role = 'staff';
-        $assigned_store_id = null;
-        $admin_role = null;
+        $access = \App\Support\AccessCache::getUserAccess($user);
+        $role = $access['is_admin'] ? 'admin' : ($access['role'] ?? 'staff');
 
-        // 1. Check if user is a platform admin
-        $adminRow = DB::table('admin_roles')
-            ->where('user_id', $user->id)
-            ->where('is_active', true)
-            ->first();
-
-        if ($adminRow) {
-            $role = 'admin';
-            $admin_role = $adminRow->role; // 'super_owner', 'admin', 'support'
-        } else {
-            // 2. Check if user is an owner of any store
-            $isOwner = \App\Models\Store::where('owner_user_id', $user->id)->exists();
-            if ($isOwner) {
-                $role = 'owner';
-            } else {
-                // 3. Check if user is staff
-                $staff = \App\Models\StaffAccount::where('user_id', $user->id)
-                    ->where('is_active', true)
-                    ->first();
-                    
-                if ($staff) {
-                    $role = $staff->role;
-                    $assigned_store_id = $staff->store_id;
-                }
-            }
-        }
-
-        return array_merge($user->toArray(), [
+        return array_merge($user->only(['id', 'name', 'full_name', 'email', 'phone', 'created_at']), [
             'role'              => $role,
-            'admin_role'        => $admin_role,
-            'assigned_store_id' => $assigned_store_id,
+            'admin_role'        => $access['admin_role'],
+            'assigned_store_id' => $access['assigned_store_id'],
             'email'             => $user->email,
             'full_name'         => $user->full_name ?? $user->name,
+            'stores'            => $access['stores'] ?? [],
         ]);
     });
 
@@ -111,7 +69,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
         \App\Http\Middleware\CheckFeatureAccess::class
     ])->group(function () {
         
-        // Fast optimized endpoint to get all store data in one request
+        // Fast optimized endpoint to get all store data, license status, features, and payment accounts in one request
         Route::post('/rest/v1/rpc/get_store_data', function (Request $request) {
             $storeId = $request->input('_store_id') ?? $request->input('store_id');
             if (!$storeId) return response()->json(['error' => 'Store ID is required'], 400);
@@ -120,27 +78,36 @@ Route::middleware(['auth:sanctum'])->group(function () {
             $recentSales = \App\Models\Sale::where('store_id', $storeId)->orderBy('sold_at', 'desc')->take(500)->get();
             $recentSalesIds = $recentSales->pluck('id');
 
+            $recentPurchases = \App\Models\Purchase::where('store_id', $storeId)->orderBy('created_at', 'desc')->take(200)->get();
+            $recentPurchaseIds = $recentPurchases->pluck('id');
+
+            $evaluatedLicense = \App\Support\AccessCache::evaluateStoreLicense((string) $storeId);
+
             return response()->json([
                 'items' => \App\Models\Item::with(['subCategory'])->where('store_id', $storeId)->get(),
                 'customers' => \App\Models\Customer::where('store_id', $storeId)->get(),
                 'suppliers' => \App\Models\Supplier::where('store_id', $storeId)->get(),
-                'expenses' => \App\Models\Expense::with(['user', 'refunder'])->where('store_id', $storeId)->orderBy('created_at', 'desc')->take(500)->get(),
+                'expenses' => \App\Models\Expense::with(['user:id,name,full_name', 'refunder:id,name,full_name'])->where('store_id', $storeId)->orderBy('created_at', 'desc')->take(500)->get(),
                 'sales' => $recentSales,
-                // sale_items doesn't have store_id directly, get via sales
-                'saleItems' => \App\Models\SaleItem::whereIn('sale_id', $recentSalesIds)->get(),
+                'saleItems' => $recentSalesIds->isNotEmpty()
+                    ? \App\Models\SaleItem::whereIn('sale_id', $recentSalesIds)->get()
+                    : [],
                 'customerDebts' => \App\Models\CustomerDebt::where('store_id', $storeId)->get(),
-                'payments' => \App\Models\Payment::with('user')->where('store_id', $storeId)->orderBy('created_at', 'desc')->take(500)->get(),
+                'payments' => \App\Models\Payment::with('user:id,name,full_name')->where('store_id', $storeId)->orderBy('created_at', 'desc')->take(500)->get(),
                 'returns' => \App\Models\ReturnModel::where('store_id', $storeId)->orderBy('created_at', 'desc')->take(200)->get(),
                 'staffAccounts' => \App\Models\StaffAccount::where('store_id', $storeId)->get(),
                 'stockTransfers' => \App\Models\StockTransfer::where(function($q) use ($storeId) {
                     $q->where('source_store_id', $storeId)->orWhere('destination_store_id', $storeId);
                 })->orderBy('created_at', 'desc')->take(200)->get(),
                 'categories' => \App\Models\Category::where('store_id', $storeId)->orderBy('created_at', 'asc')->get(),
-                'purchases' => \App\Models\Purchase::where('store_id', $storeId)->orderBy('created_at', 'desc')->take(200)->get(),
-                'purchaseItems' => \App\Models\PurchaseItem::whereHas('purchase', function($q) use ($storeId) {
-                    $q->where('store_id', $storeId);
-                })->get(),
+                'purchases' => $recentPurchases,
+                'purchaseItems' => $recentPurchaseIds->isNotEmpty()
+                    ? \App\Models\PurchaseItem::whereIn('purchase_id', $recentPurchaseIds)->get()
+                    : [],
                 'accountTransfers' => \App\Models\AccountTransfer::where('store_id', $storeId)->orderBy('created_at', 'desc')->take(200)->get(),
+                'paymentAccounts' => \App\Models\PaymentAccount::where('store_id', $storeId)->orderBy('created_at', 'asc')->get(),
+                'licenseStatus' => $evaluatedLicense['licenseStatus'],
+                'storeFeatures' => $evaluatedLicense['storeFeatures'],
             ]);
         });
 
@@ -217,14 +184,8 @@ Route::middleware(['auth:sanctum'])->group(function () {
                 }
             }
 
-            $rows = \App\Models\SystemSetting::whereIn('setting_key', ['platform_name', 'system_logo', 'system_favicon'])
-                ->pluck('setting_value', 'setting_key');
-
-            return response()->json([
-                'platform_name' => !empty($rows['platform_name']) ? $rows['platform_name'] : config('app.name', 'Nasri Account System'),
-                'system_logo' => $rows['system_logo'] ?? '',
-                'system_favicon' => $rows['system_favicon'] ?? '',
-            ]);
+            \App\Support\AccessCache::clearSystemBranding();
+            return response()->json(\App\Support\AccessCache::getSystemBranding());
         });
     });
 
