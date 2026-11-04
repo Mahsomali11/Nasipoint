@@ -30,10 +30,11 @@ export default function DashboardPage() {
       });
   }, [sales, customers, payments]);
 
-  const { lowStockItems, outOfStockItems, lowStockCount } = useMemo(() => {
+  const { totalStock, lowStockItems, outOfStockItems, lowStockCount } = useMemo(() => {
+    const total = items.reduce((sum, i) => sum + Number(i.quantity || 0), 0);
     const low = items.filter(i => i.type === 'product' && i.quantity > 0 && i.quantity <= i.low_stock_threshold);
     const out = items.filter(i => i.type === 'product' && i.quantity === 0);
-    return { lowStockItems: low, outOfStockItems: out, lowStockCount: low.length + out.length };
+    return { totalStock: total, lowStockItems: low, outOfStockItems: out, lowStockCount: low.length + out.length };
   }, [items]);
 
   const hasInventoryFeature = hasFeature('inventory');

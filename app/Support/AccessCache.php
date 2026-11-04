@@ -104,19 +104,13 @@ class AccessCache
 
             $role = $isAnyOwner ? 'owner' : $primaryStaffRole;
 
-            $storeFields = [
-                'id', 'store_name', 'business_type', 'currency', 'tax_rate',
-                'address', 'phone', 'email', 'logo_path', 'owner_user_id',
-                'is_active', 'setup_completed', 'created_at',
-            ];
-
             if ($isAnyOwner) {
-                $stores = $ownedStores->map(fn ($s) => $s->only($storeFields))->values()->all();
+                $stores = $ownedStores->map(fn ($s) => $s->toArray())->values()->all();
             } elseif (!empty($staffRolesByStore)) {
                 $staffStoreIds = array_keys($staffRolesByStore);
                 $stores = Store::whereIn('id', $staffStoreIds)
                     ->get()
-                    ->map(fn ($s) => $s->only($storeFields))->values()->all();
+                    ->map(fn ($s) => $s->toArray())->values()->all();
             } else {
                 $stores = [];
             }

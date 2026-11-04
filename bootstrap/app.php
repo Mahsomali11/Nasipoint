@@ -4,7 +4,7 @@ use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 
-return Application::configure(basePath: dirname(__DIR__))
+$app = Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
         web: __DIR__.'/../routes/web.php',
         api: __DIR__.'/../routes/api.php',
@@ -44,3 +44,35 @@ return Application::configure(basePath: dirname(__DIR__))
             }
         });
     })->create();
+
+// When installed under C:\Program Files, non-elevated web workers may not have write access to storage/.
+// Automatically fall back to a writable storage directory in the user's temp folder when needed.
+$defaultStorage = dirname(__DIR__).DIRECTORY_SEPARATOR.'storage';
+$defaultLogsDir = $defaultStorage.DIRECTORY_SEPARATOR.'logs';
+$defaultLogFile = $defaultLogsDir.DIRECTORY_SEPARATOR.'laravel.log';
+$defaultViewsDir = $defaultStorage.DIRECTORY_SEPARATOR.'framework'.DIRECTORY_SEPARATOR.'views';
+
+$isStorageWritable = is_writable($defaultLogsDir)
+    && is_writable($defaultViewsDir)
+    && (!file_exists($defaultLogFile) || is_writable($defaultLogFile));
+
+if (!$isStorageWritable) {
+    $fallbackStorage = rtrim(sys_get_temp_dir(), '\\/').DIRECTORY_SEPARATOR.'nasripoint-storage';
+    foreach ([
+        $fallbackStorage.DIRECTORY_SEPARATOR.'app'.DIRECTORY_SEPARATOR.'private',
+        $fallbackStorage.DIRECTORY_SEPARATOR.'app'.DIRECTORY_SEPARATOR.'public',
+        $fallbackStorage.DIRECTORY_SEPARATOR.'framework'.DIRECTORY_SEPARATOR.'cache'.DIRECTORY_SEPARATOR.'data',
+        $fallbackStorage.DIRECTORY_SEPARATOR.'framework'.DIRECTORY_SEPARATOR.'sessions',
+        $fallbackStorage.DIRECTORY_SEPARATOR.'framework'.DIRECTORY_SEPARATOR.'testing',
+        $fallbackStorage.DIRECTORY_SEPARATOR.'framework'.DIRECTORY_SEPARATOR.'views',
+        $fallbackStorage.DIRECTORY_SEPARATOR.'logs',
+        $fallbackStorage.DIRECTORY_SEPARATOR.'inertia-devtools',
+    ] as $dir) {
+        if (!is_dir($dir)) {
+            @mkdir($dir, 0777, true);
+        }
+    }
+    $app->useStoragePath($fallbackStorage);
+}
+
+return $app;

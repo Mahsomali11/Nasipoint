@@ -31,19 +31,17 @@ if (appEl && appEl.dataset.page) {
     }
 }
 
-const pages = import.meta.glob('./pages/**/*.tsx');
+const pages = import.meta.glob('./pages/**/*.tsx', { eager: true });
 
 createInertiaApp({
     title: (title) => title ? `${title} - ${getPlatformName()}` : getPlatformName(),
     page: initialPageData,
-    resolve: async (name) => {
-        const importPage = pages[`./pages/${name}.tsx`];
-        if (!importPage) {
+    resolve: (name) => {
+        const page = pages[`./pages/${name}.tsx`];
+        if (!page) {
             console.error(`Page not found: ./pages/${name}.tsx`);
             return;
         }
-
-        const page = await importPage();
 
         // If it has a default export
         if (page.default) {

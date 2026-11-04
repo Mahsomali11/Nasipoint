@@ -57,13 +57,35 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    // Only check session on admin routes
-    const isAdminRoute = window.location.pathname.startsWith('/admin');
-    if (!isAdminRoute) {
-      setLoading(false);
-      return;
-    }
-    loadAdminFromSession();
+    const checkAndLoad = (pageProps?: any) => {
+      const isAdminRoute = window.location.pathname.startsWith('/admin');
+      if (!isAdminRoute) {
+        setLoading(false);
+        return;
+      }
+      const inertiaUser = pageProps?.auth?.user;
+      if (inertiaUser && (inertiaUser.role === 'admin' || inertiaUser.admin_role)) {
+        setSession({ access_token: 'session', user: inertiaUser });
+        setAdmin({
+          id: inertiaUser.id,
+          email: inertiaUser.email || '',
+          full_name: inertiaUser.full_name || inertiaUser.name || '',
+          role: inertiaUser.admin_role as 'super_owner' | 'admin' | 'support',
+          admin_role: inertiaUser.admin_role,
+        });
+        setLoading(false);
+        return;
+      }
+      loadAdminFromSession();
+    };
+
+    checkAndLoad();
+
+    const handleInertiaNavigate = (event: any) => {
+      checkAndLoad(event?.detail?.page?.props);
+    };
+    document.addEventListener('inertia:navigate', handleInertiaNavigate);
+    return () => document.removeEventListener('inertia:navigate', handleInertiaNavigate);
   }, [loadAdminFromSession]);
 
   const logout = useCallback(async () => {

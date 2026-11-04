@@ -293,12 +293,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   // Auth state listener
   useEffect(() => {
-    // Don't trigger heavy store data loading on admin routes
-    const isAdminRoute = window.location.pathname.startsWith('/admin');
-    if (isAdminRoute) {
-      setState(prev => ({ ...prev, loading: false }));
-      return;
-    }
+    const checkSession = () => {
+      const isAdminRoute = window.location.pathname.startsWith('/admin');
+      if (isAdminRoute) {
+        setState(prev => ({ ...prev, loading: false }));
+        return;
+      }
+
+      apiClient.auth.getSession().then(({ data: { session } }) => {
+        if (!session) {
+          setState(prev => ({ ...prev, loading: false }));
+        } else {
+          setTimeout(() => {
+            loadUserData(session.user.id, session);
+          }, 0);
+        }
+      });
+    };
 
     const { data: { subscription } } = apiClient.auth.onAuthStateChange((event, session) => {
       if (session?.user) {
@@ -326,17 +337,38 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
     });
 
-    apiClient.auth.getSession().then(({ data: { session } }) => {
-      if (!session) {
-        setState(prev => ({ ...prev, loading: false }));
-      } else {
-        setTimeout(() => {
-          loadUserData(session.user.id, session);
-        }, 0);
-      }
-    });
+    checkSession();
 
-    return () => subscription.unsubscribe();
+    const handleInertiaNavigate = (event: any) => {
+      const isAdminRoute = window.location.pathname.startsWith('/admin');
+      if (isAdminRoute) return;
+      const inertiaUser = event?.detail?.page?.props?.auth?.user;
+      const inertiaStores = event?.detail?.page?.props?.auth?.stores;
+      if (inertiaUser && inertiaUser.id) {
+        setState(prev => {
+          if (prev.session?.user?.id === inertiaUser.id && prev.currentStore) {
+            return prev;
+          }
+          const user = {
+            ...inertiaUser,
+            full_name: inertiaUser.full_name || inertiaUser.name || '',
+            stores: Array.isArray(inertiaStores) ? inertiaStores : inertiaUser.stores,
+          };
+          const session: Session = { access_token: 'session', user };
+          setTimeout(() => {
+            loadUserData(user.id, session);
+          }, 0);
+          return prev;
+        });
+      }
+    };
+
+    document.addEventListener('inertia:navigate', handleInertiaNavigate);
+
+    return () => {
+      subscription.unsubscribe();
+      document.removeEventListener('inertia:navigate', handleInertiaNavigate);
+    };
   }, [loadUserData]);
 
   const refreshData = useCallback(async () => {
