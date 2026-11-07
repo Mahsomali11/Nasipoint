@@ -342,6 +342,29 @@ class DynamicApiController extends Controller
             }
         }
 
+        // Prevent logged-in user from modifying their own staff_accounts row (role/self-modification lockout protection)
+        if ($table === 'staff_accounts') {
+            $user = $request->user() ?? auth()->user();
+            if ($user) {
+                $targetId = $id;
+                if (!$targetId) {
+                    $eqId = $request->query('id');
+                    if (is_string($eqId) && str_starts_with($eqId, 'eq.')) {
+                        $targetId = substr($eqId, 3);
+                    }
+                }
+                if ($targetId) {
+                    $targetStaff = \App\Models\StaffAccount::find($targetId);
+                    if ($targetStaff && (
+                        (!empty($targetStaff->user_id) && (string) $targetStaff->user_id === (string) $user->id) ||
+                        (!empty($targetStaff->email) && !empty($user->email) && strtolower(trim($targetStaff->email)) === strtolower(trim($user->email)))
+                    )) {
+                        return response()->json(['error' => 'Forbidden: You cannot modify your own staff account.'], 403);
+                    }
+                }
+            }
+        }
+
         // Use only JSON body data, or fallback to POST
         $body = $request->json()->all();
         if (empty($body)) {
@@ -442,6 +465,29 @@ class DynamicApiController extends Controller
             $access = $user ? \App\Support\AccessCache::getUserAccess($user) : ['is_admin' => false, 'is_any_owner' => false];
             if (!$access['is_admin'] && !$access['is_any_owner']) {
                 return response()->json(['error' => 'Forbidden: Only Store Owners and Admins are permitted to delete expenses.'], 403);
+            }
+        }
+
+        // Prevent logged-in user from deleting their own staff_accounts row (self-deletion lockout protection)
+        if ($table === 'staff_accounts') {
+            $user = $request->user() ?? auth()->user();
+            if ($user) {
+                $targetId = $id;
+                if (!$targetId) {
+                    $eqId = $request->query('id');
+                    if (is_string($eqId) && str_starts_with($eqId, 'eq.')) {
+                        $targetId = substr($eqId, 3);
+                    }
+                }
+                if ($targetId) {
+                    $targetStaff = \App\Models\StaffAccount::find($targetId);
+                    if ($targetStaff && (
+                        (!empty($targetStaff->user_id) && (string) $targetStaff->user_id === (string) $user->id) ||
+                        (!empty($targetStaff->email) && !empty($user->email) && strtolower(trim($targetStaff->email)) === strtolower(trim($user->email)))
+                    )) {
+                        return response()->json(['error' => 'Forbidden: You cannot delete your own staff account.'], 403);
+                    }
+                }
             }
         }
         
