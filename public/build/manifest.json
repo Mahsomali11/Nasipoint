@@ -24,7 +24,7 @@
     "isDynamicEntry": true
   },
   "resources/js/app.jsx": {
-    "file": "assets/app-CiPNh31M.js",
+    "file": "assets/app-Dd1n_ILJ.js",
     "name": "app",
     "src": "resources/js/app.jsx",
     "isEntry": true,
@@ -39,11 +39,11 @@
       "node_modules/xlsx/xlsx.mjs"
     ],
     "css": [
-      "assets/app-DbZSpAez.css"
+      "assets/app-CngXpfug.css"
     ]
   },
   "resources/js/index.css": {
-    "file": "assets/app-DbZSpAez.css",
+    "file": "assets/app-CngXpfug.css",
     "src": "resources/js/app.jsx",
     "isEntry": true
   }

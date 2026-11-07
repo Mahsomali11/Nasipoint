@@ -118,7 +118,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       isAdminAuthenticated: !!admin,
       loading,
       logout,
-      isSuperOwner: admin?.role === 'super_owner',
+      isSuperOwner: admin?.role === 'super_owner' || admin?.admin_role === 'super_owner' || admin?.admin_role === 'superadmin',
     }}>
       {children}
     </AdminContext.Provider>

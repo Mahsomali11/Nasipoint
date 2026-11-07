@@ -413,8 +413,12 @@ class DynamicApiController extends Controller
     {
         $class = $this->getModelClass($table);
 
-        if (in_array($table, ['stores', 'staff_accounts', 'licenses', 'plans', 'system_settings', 'admin_roles'], true)) {
-            \Illuminate\Support\Facades\Cache::flush();
+        if ($table === 'licenses') {
+            $user = $request->user() ?? auth()->user();
+            $access = $user ? \App\Support\AccessCache::getUserAccess($user) : ['is_admin' => false, 'admin_role' => null];
+            if (!$access['is_admin'] || !in_array($access['admin_role'], ['super_owner', 'superadmin'], true)) {
+                return response()->json(['error' => 'Forbidden: Only Super Admins are permitted to delete licenses.'], 403);
+            }
         }
 
         if ($table === 'expenses') {
@@ -428,6 +432,11 @@ class DynamicApiController extends Controller
         if ($id) {
             $record = $class::findOrFail($id);
             $record->delete();
+            if (in_array($table, ['stores', 'staff_accounts', 'licenses', 'subscriptions', 'plans', 'system_settings', 'admin_roles'], true)) {
+                \App\Support\AccessCache::clearStoreLicense();
+                \App\Support\AccessCache::clearUserAccess();
+                \Illuminate\Support\Facades\Cache::flush();
+            }
             return response()->json(null, 204);
         }
         
@@ -450,6 +459,11 @@ class DynamicApiController extends Controller
         
         if ($filtered) {
             $query->delete();
+            if (in_array($table, ['stores', 'staff_accounts', 'licenses', 'subscriptions', 'plans', 'system_settings', 'admin_roles'], true)) {
+                \App\Support\AccessCache::clearStoreLicense();
+                \App\Support\AccessCache::clearUserAccess();
+                \Illuminate\Support\Facades\Cache::flush();
+            }
             return response()->json(null, 204);
         }
         
