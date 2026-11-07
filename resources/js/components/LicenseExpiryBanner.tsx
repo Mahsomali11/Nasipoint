@@ -10,7 +10,7 @@ interface LicenseExpiryBannerProps {
 export default function LicenseExpiryBanner({ daysRemaining, expiryDate }: LicenseExpiryBannerProps) {
   const [dismissed, setDismissed] = useState(false);
 
-  if (dismissed || daysRemaining > 7 || daysRemaining <= 0) return null;
+  if (dismissed || daysRemaining > 7 || daysRemaining < 0) return null;
 
   const isUrgent = daysRemaining <= 1;
   const isWarning = daysRemaining <= 3;
@@ -21,7 +21,9 @@ export default function LicenseExpiryBanner({ daysRemaining, expiryDate }: Licen
     ? 'bg-warning/10 border-warning/20 text-warning'
     : 'bg-primary/10 border-primary/20 text-primary';
 
-  const message = isUrgent
+  const message = daysRemaining === 0
+    ? `Your license expires today${expiryDate ? ` (${expiryDate})` : ''}! Renew now to avoid service interruption.`
+    : isUrgent
     ? `Your license expires tomorrow${expiryDate ? ` (${expiryDate})` : ''}! Renew now to avoid service interruption.`
     : daysRemaining <= 3
     ? `Your license expires in ${daysRemaining} days${expiryDate ? ` (${expiryDate})` : ''}. Please renew to avoid service interruption.`

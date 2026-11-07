@@ -1,3 +1,5 @@
+import { calculateLicenseDaysLeft, getEffectiveLicenseStatus } from '@/lib/license';
+
 export interface User {
   id: string;
   email?: string;
@@ -372,35 +374,28 @@ export const api = {
            const storeData = await storeRes.json();
            if (storeData && storeData.length > 0) {
              const ownerId = storeData[0].owner_user_id;
-             let licRes = await fetch(`${API_URL}/rest/v1/licenses?owner_user_id=eq.${ownerId}&status=eq.active&order=expiry_date.desc&select=*,plans(name)`, { headers: getHeaders(), credentials: 'same-origin' });
-             let licData = await licRes.json();
-             if (!licData || licData.length === 0) {
-                 licRes = await fetch(`${API_URL}/rest/v1/licenses?owner_user_id=eq.${ownerId}&order=created_at.desc&limit=1&select=*,plans(name)`, { headers: getHeaders(), credentials: 'same-origin' });
-                 licData = await licRes.json();
-             }
+             const licRes = await fetch(`${API_URL}/rest/v1/licenses?owner_user_id=eq.${ownerId}&order=expiry_date.desc&select=*,plans(name,features)`, { headers: getHeaders(), credentials: 'same-origin' });
+             const licData = await licRes.json();
              if (licData && licData.length > 0) {
                const lic = licData[0];
-               let remaining = 999;
-               let isTimestampExpired = false;
                const expiryTimestamp = lic.expiry_date || lic.expires_at;
-               if (expiryTimestamp) {
-                 const diffMs = new Date(expiryTimestamp).getTime() - Date.now();
-                 isTimestampExpired = diffMs <= 0;
-                 remaining = isTimestampExpired ? 0 : Math.max(1, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
-               }
-               const effectiveStatus = (lic.status === 'active' && isTimestampExpired) ? 'expired' : lic.status;
+               const remaining = expiryTimestamp ? calculateLicenseDaysLeft(expiryTimestamp) : 365;
+               const effectiveStatus = getEffectiveLicenseStatus(lic);
                return { 
                  data: { 
+                   valid: effectiveStatus === 'active',
                    status: effectiveStatus, 
-                   plan_name: lic.plans?.name || 'Unknown', 
+                   plan_name: lic.plans?.name || lic.plan_name || 'Free Trial', 
                    days_remaining: remaining,
+                   days_left: remaining,
                    expiry_date: expiryTimestamp
                  } 
                };
              }
+             return { data: { valid: true, status: 'none', plan_name: 'None', days_remaining: 365, days_left: 365 } };
            }
          } catch (e) { }
-         return { data: { status: 'expired', plan_name: 'None', days_remaining: 0 } };
+         return { data: { valid: true, status: 'none', plan_name: 'None', days_remaining: 365, days_left: 365 } };
       }
       if (fn === 'get_store_features') {
          try {
@@ -408,14 +403,20 @@ export const api = {
            const storeData = await storeRes.json();
            if (storeData && storeData.length > 0) {
              const ownerId = storeData[0].owner_user_id;
-             let licRes = await fetch(`${API_URL}/rest/v1/licenses?owner_user_id=eq.${ownerId}&status=eq.active&order=expiry_date.desc`, { headers: getHeaders(), credentials: 'same-origin' });
-             let licData = await licRes.json();
-             if (!licData || licData.length === 0) {
-                 licRes = await fetch(`${API_URL}/rest/v1/licenses?owner_user_id=eq.${ownerId}&order=created_at.desc&limit=1`, { headers: getHeaders(), credentials: 'same-origin' });
-                 licData = await licRes.json();
-             }
+             const licRes = await fetch(`${API_URL}/rest/v1/licenses?owner_user_id=eq.${ownerId}&order=expiry_date.desc&select=*,plans(features)`, { headers: getHeaders(), credentials: 'same-origin' });
+             const licData = await licRes.json();
              if (licData && licData.length > 0) {
-               return { data: typeof licData[0].features_enabled === 'string' ? JSON.parse(licData[0].features_enabled) : (licData[0].features_enabled || {}) };
+               const lic = licData[0];
+               let raw = typeof lic.features_enabled === 'string' ? JSON.parse(lic.features_enabled) : lic.features_enabled;
+               if ((!raw || Object.keys(raw).length === 0) && lic.plans?.features) {
+                 raw = typeof lic.plans.features === 'string' ? JSON.parse(lic.plans.features) : lic.plans.features;
+               }
+               if (Array.isArray(raw)) {
+                 const mapped: Record<string, boolean> = {};
+                 raw.forEach((k: string) => { mapped[k] = true; });
+                 return { data: mapped };
+               }
+               return { data: raw || {} };
              }
            }
          } catch (e) { }

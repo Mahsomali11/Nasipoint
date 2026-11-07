@@ -7,6 +7,7 @@ import { usePage, router } from '@inertiajs/react';
 import { ROUTE_FEATURE_MAP } from '@/lib/features';
 import { useFeatureAccess } from '@/hooks/useFeatureAccess';
 import { useSystemBranding } from '@/hooks/usePlatformName';
+import { calculateLicenseDaysLeft } from '@/lib/license';
 
 interface DesktopLayoutProps {
   children: ReactNode;
@@ -17,7 +18,9 @@ export default function DesktopLayout({ children }: DesktopLayoutProps) {
   const { url } = usePage();
   const { hasFeature } = useFeatureAccess();
   const { systemName, systemLogo } = useSystemBranding();
-  const daysRemaining = licenseStatus?.days_remaining ?? 999;
+  const daysRemaining = licenseStatus?.expiry_date
+    ? calculateLicenseDaysLeft(licenseStatus.expiry_date)
+    : (licenseStatus?.days_remaining ?? licenseStatus?.days_left ?? 999);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // Check feature access
@@ -108,7 +111,7 @@ export default function DesktopLayout({ children }: DesktopLayoutProps) {
       <main className="flex-1 min-w-0 flex flex-col overflow-y-auto">
         
 
-        {licenseStatus?.status === 'active' && daysRemaining <= 7 && (
+        {isLicenseActive && licenseStatus && licenseStatus.status !== 'none' && daysRemaining >= 0 && daysRemaining <= 7 && (
           <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-4 lg:pt-6 pb-2 shrink-0">
             <LicenseExpiryBanner
               daysRemaining={daysRemaining}

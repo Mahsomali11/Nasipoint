@@ -5,6 +5,7 @@ import StatCard from '@/components/admin/StatCard';
 import { Store, Users, KeyRound, DollarSign, Activity, AlertTriangle, TrendingUp, ShoppingCart } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, AreaChart, Area } from 'recharts';
 import { getExchangeRates, convertToUsd, formatUsd } from '@/lib/currency';
+import { getEffectiveLicenseStatus } from '@/lib/license';
 
 export default function AdminDashboardPage() {
   const [stats, setStats] = useState({
@@ -40,9 +41,9 @@ export default function AdminDashboardPage() {
         apiClient.from('stores').select('id, created_at'),
       ]);
 
-      const activeLicenses = (licenses || []).filter((l: any) => l.status === 'active').length;
-      const suspendedLicenses = (licenses || []).filter((l: any) => l.status === 'suspended').length;
-      const expiredLicenses = (licenses || []).filter((l: any) => l.status === 'expired').length;
+      const activeLicenses = (licenses || []).filter((l: any) => getEffectiveLicenseStatus(l) === 'active').length;
+      const suspendedLicenses = (licenses || []).filter((l: any) => getEffectiveLicenseStatus(l) === 'suspended').length;
+      const expiredLicenses = (licenses || []).filter((l: any) => getEffectiveLicenseStatus(l) === 'expired').length;
       const totalRevenue = (paymentsData || []).filter((p: any) => p.status === 'completed').reduce((s: number, p: any) => s + Number(p.amount), 0);
       const totalTransactions = (sales || []).length;
       

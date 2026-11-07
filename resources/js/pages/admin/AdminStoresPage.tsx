@@ -4,6 +4,7 @@ import { api as apiClient } from '@/api';
 import { useAdmin } from '@/context/AdminContext';
 import { Search, CheckCircle, Pause, Trash2, Eye } from 'lucide-react';
 import { toast } from 'sonner';
+import { getEffectiveLicenseStatus } from '@/lib/license';
 
 export default function AdminStoresPage() {
   const { isSuperOwner } = useAdmin();
@@ -68,13 +69,14 @@ export default function AdminStoresPage() {
 
   const getStatusBadge = (license: any) => {
     if (!license) return <span className="px-2 py-0.5 rounded-full text-xs bg-gray-500/20 text-gray-400">No License</span>;
+    const effectiveStatus = getEffectiveLicenseStatus(license);
     const colors: Record<string, string> = {
       active: 'bg-green-500/20 text-green-400',
       suspended: 'bg-yellow-500/20 text-yellow-400',
       expired: 'bg-red-500/20 text-red-400',
       cancelled: 'bg-gray-500/20 text-gray-400',
     };
-    return <span className={`px-2 py-0.5 rounded-full text-xs ${colors[license.status] || colors.cancelled}`}>{license.status}</span>;
+    return <span className={`px-2 py-0.5 rounded-full text-xs ${colors[effectiveStatus] || colors.cancelled}`}>{effectiveStatus}</span>;
   };
 
   if (loading) return <div className="flex items-center justify-center h-64"><div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin" /></div>;

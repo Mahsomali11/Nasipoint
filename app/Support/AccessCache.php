@@ -151,41 +151,62 @@ class AccessCache
             }
 
             $license = DB::table('licenses')
+                ->leftJoin('plans', 'licenses.plan_id', '=', 'plans.id')
+                ->select([
+                    'licenses.*',
+                    'plans.name as resolved_plan_name',
+                    'plans.features as plan_features',
+                ])
                 ->where(function ($q) use ($store) {
-                    $q->where('owner_user_id', $store->owner_user_id);
+                    $q->where('licenses.owner_user_id', $store->owner_user_id);
                     if ($store->id) {
-                        $q->orWhere('store_id', $store->id);
+                        $q->orWhere('licenses.store_id', $store->id);
                     }
                 })
-                ->where('status', 'active')
-                ->orderBy('expiry_date', 'desc')
+                ->orderByRaw("CASE WHEN licenses.status = 'suspended' THEN 1 ELSE 0 END ASC")
+                ->orderBy('licenses.expiry_date', 'desc')
+                ->orderBy('licenses.created_at', 'desc')
                 ->first();
-
-            if (!$license) {
-                $license = DB::table('licenses')
-                    ->where(function ($q) use ($store) {
-                        $q->where('owner_user_id', $store->owner_user_id);
-                        if ($store->id) {
-                            $q->orWhere('store_id', $store->id);
-                        }
-                    })
-                    ->orderBy('created_at', 'desc')
-                    ->first();
-            }
 
             $licenseArr = null;
             if ($license) {
-                $features = is_string($license->features_enabled)
+                $rawFeatures = is_string($license->features_enabled)
                     ? json_decode($license->features_enabled, true)
                     : (array) ($license->features_enabled ?? []);
+
+                if (empty($rawFeatures) && !empty($license->plan_features)) {
+                    $rawFeatures = is_string($license->plan_features)
+                        ? json_decode($license->plan_features, true)
+                        : (array) $license->plan_features;
+                }
+
+                $normalizedFeatures = [];
+                if (is_array($rawFeatures) && !empty($rawFeatures)) {
+                    if (array_is_list($rawFeatures)) {
+                        foreach ($rawFeatures as $featureKey) {
+                            if (is_string($featureKey) && array_key_exists($featureKey, self::DEFAULT_ALL_FEATURES)) {
+                                $normalizedFeatures[$featureKey] = true;
+                            }
+                        }
+                    } else {
+                        foreach ($rawFeatures as $featureKey => $enabled) {
+                            if (is_string($featureKey)) {
+                                $normalizedFeatures[$featureKey] = (bool) $enabled;
+                            }
+                        }
+                    }
+                }
+
+                $planName = $license->resolved_plan_name
+                    ?? ($license->plan_name ?? 'Free Trial');
 
                 $licenseArr = [
                     'id' => $license->id,
                     'status' => $license->status ?? 'none',
-                    'plan_name' => $license->plan_name ?? 'Free Trial',
+                    'plan_name' => $planName,
                     'billing_cycle' => $license->billing_cycle ?? 'monthly',
                     'expiry_date' => $license->expiry_date ?? $license->expires_at ?? null,
-                    'features_enabled' => is_array($features) ? $features : [],
+                    'features_enabled' => $normalizedFeatures,
                 ];
             }
 
@@ -202,6 +223,10 @@ class AccessCache
 
     /**
      * Evaluate real-time license status & store features for frontend consumption and middleware checks.
+     *
+     * Rules:
+     * - Days Left = ceil((expiry_date - now()) in days)
+     * - Whenever expiry_date >= now() (days_left >= 0) and status != 'suspended', the license is strictly 'active'.
      */
     public static function evaluateStoreLicense(string $storeId): array
     {
@@ -209,7 +234,7 @@ class AccessCache
         if (!$cached['store_exists']) {
             return [
                 'store_exists' => false,
-                'licenseStatus' => ['valid' => true, 'status' => 'none'],
+                'licenseStatus' => ['valid' => true, 'status' => 'none', 'days_left' => 365, 'days_remaining' => 365],
                 'storeFeatures' => self::DEFAULT_ALL_FEATURES,
             ];
         }
@@ -218,86 +243,93 @@ class AccessCache
         if (!$license || ($license['status'] ?? 'none') === 'none') {
             return [
                 'store_exists' => true,
-                'licenseStatus' => ['valid' => true, 'status' => 'none'],
+                'licenseStatus' => ['valid' => true, 'status' => 'none', 'days_left' => 365, 'days_remaining' => 365],
                 'storeFeatures' => self::DEFAULT_ALL_FEATURES,
             ];
         }
 
-        $status = strtolower($license['status'] ?? '');
+        $status = strtolower((string) ($license['status'] ?? ''));
         $expiryDate = $license['expiry_date'] ?? null;
 
-        if (in_array($status, ['suspended', 'canceled', 'cancelled', 'expired'], true)) {
-            return [
-                'store_exists' => true,
-                'licenseStatus' => [
-                    'valid' => false,
-                    'status' => $license['status'],
-                    'plan_name' => $license['plan_name'],
-                    'billing_cycle' => $license['billing_cycle'],
-                    'expiry_date' => $expiryDate,
-                    'days_left' => 0,
-                    'hours_left' => 0,
-                ],
-                'storeFeatures' => self::LOCKED_FEATURES,
-            ];
-        }
-
         if ($expiryDate) {
-            $expiresAt = Carbon::parse($expiryDate);
+            $expiresAt = Carbon::parse($expiryDate)->startOfDay();
             $now = Carbon::now();
-            if ($expiresAt->lessThanOrEqualTo($now)) {
-                return [
-                    'store_exists' => true,
-                    'licenseStatus' => [
-                        'valid' => false,
-                        'status' => 'expired',
-                        'plan_name' => $license['plan_name'],
-                        'billing_cycle' => $license['billing_cycle'],
-                        'expiry_date' => $expiryDate,
-                        'days_left' => 0,
-                        'hours_left' => 0,
-                    ],
-                    'storeFeatures' => self::LOCKED_FEATURES,
-                ];
+            $daysLeft = (int) ceil(($expiresAt->getTimestamp() - $now->getTimestamp()) / 86400);
+            if ($daysLeft === 0) {
+                $daysLeft = 0; // Normalize -0 to 0
             }
-
-            $diffSeconds = max(0, $now->diffInSeconds($expiresAt, false));
-            $daysLeft = (int) floor($diffSeconds / 86400);
-            $hoursLeft = (int) ceil($diffSeconds / 3600);
+            $endOfExpiryDay = $expiresAt->copy()->endOfDay();
+            $hoursLeft = max(0, (int) ceil(($endOfExpiryDay->getTimestamp() - $now->getTimestamp()) / 3600));
         } else {
             $daysLeft = 365;
             $hoursLeft = 8760;
         }
 
-        if ($status !== 'active') {
+        if ($status === 'suspended') {
             return [
                 'store_exists' => true,
                 'licenseStatus' => [
                     'valid' => false,
-                    'status' => $license['status'],
+                    'status' => 'suspended',
                     'plan_name' => $license['plan_name'],
                     'billing_cycle' => $license['billing_cycle'],
                     'expiry_date' => $expiryDate,
-                    'days_left' => 0,
+                    'days_left' => $daysLeft,
+                    'days_remaining' => $daysLeft,
                     'hours_left' => 0,
                 ],
                 'storeFeatures' => self::LOCKED_FEATURES,
             ];
         }
 
+        if ($daysLeft < 0) {
+            if ($status === 'active' && !empty($license['id'])) {
+                try {
+                    DB::table('licenses')->where('id', $license['id'])->update(['status' => 'expired']);
+                } catch (\Throwable $e) {
+                }
+            }
+
+            return [
+                'store_exists' => true,
+                'licenseStatus' => [
+                    'valid' => false,
+                    'status' => 'expired',
+                    'plan_name' => $license['plan_name'],
+                    'billing_cycle' => $license['billing_cycle'],
+                    'expiry_date' => $expiryDate,
+                    'days_left' => $daysLeft,
+                    'days_remaining' => $daysLeft,
+                    'hours_left' => 0,
+                ],
+                'storeFeatures' => self::LOCKED_FEATURES,
+            ];
+        }
+
+        // days_left >= 0 and status != 'suspended' => strictly ACTIVE
+        if ($status !== 'active' && !empty($license['id'])) {
+            try {
+                DB::table('licenses')->where('id', $license['id'])->update(['status' => 'active']);
+                self::$storeLicenseMemo[$storeId]['license']['status'] = 'active';
+                Cache::forget("store_license_{$storeId}");
+            } catch (\Throwable $e) {
+            }
+        }
+
         $features = !empty($license['features_enabled']) && is_array($license['features_enabled'])
             ? array_merge(self::LOCKED_FEATURES, $license['features_enabled'])
-            : self::LOCKED_FEATURES;
+            : self::DEFAULT_ALL_FEATURES;
 
         return [
             'store_exists' => true,
             'licenseStatus' => [
                 'valid' => true,
-                'status' => $license['status'],
+                'status' => 'active',
                 'plan_name' => $license['plan_name'],
                 'billing_cycle' => $license['billing_cycle'],
                 'expiry_date' => $expiryDate,
                 'days_left' => $daysLeft,
+                'days_remaining' => $daysLeft,
                 'hours_left' => $hoursLeft,
             ],
             'storeFeatures' => $features,

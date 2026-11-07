@@ -25,6 +25,24 @@ class DynamicApiController extends Controller
 
     public function index(Request $request, $table)
     {
+        if ($table === 'licenses') {
+            try {
+                $todayStr = now()->format('Y-m-d');
+                \Illuminate\Support\Facades\DB::table('licenses')
+                    ->where('status', '!=', 'suspended')
+                    ->whereNotNull('expiry_date')
+                    ->where('expiry_date', '>=', $todayStr)
+                    ->where('status', '!=', 'active')
+                    ->update(['status' => 'active']);
+                \Illuminate\Support\Facades\DB::table('licenses')
+                    ->where('status', 'active')
+                    ->whereNotNull('expiry_date')
+                    ->where('expiry_date', '<', $todayStr)
+                    ->update(['status' => 'expired']);
+            } catch (\Throwable $e) {
+            }
+        }
+
         $class = $this->getModelClass($table);
         $query = $class::query();
 
@@ -300,10 +318,6 @@ class DynamicApiController extends Controller
     {
         $class = $this->getModelClass($table);
 
-        if (in_array($table, ['stores', 'staff_accounts', 'licenses', 'plans', 'system_settings', 'admin_roles'], true)) {
-            \Illuminate\Support\Facades\Cache::flush();
-        }
-
         if ($table === 'expenses') {
             $user = $request->user() ?? auth()->user();
             $access = $user ? \App\Support\AccessCache::getUserAccess($user) : ['is_admin' => false, 'is_any_owner' => false];
@@ -318,6 +332,18 @@ class DynamicApiController extends Controller
             $body = $request->post();
         }
 
+        // Requirement: When extending a license (or setting an expiry_date >= today), automatically activate status
+        if ($table === 'licenses' && !empty($body['expiry_date'])) {
+            try {
+                $expiresAt = \Carbon\Carbon::parse($body['expiry_date'])->startOfDay();
+                $daysLeft = (int) ceil(($expiresAt->getTimestamp() - now()->getTimestamp()) / 86400);
+                if ($daysLeft >= 0) {
+                    $body['status'] = 'active';
+                }
+            } catch (\Throwable $e) {
+            }
+        }
+
         if ($id) {
             $record = $class::findOrFail($id);
             $record->update($body);
@@ -327,6 +353,12 @@ class DynamicApiController extends Controller
                 \Illuminate\Support\Facades\DB::table('licenses')
                     ->where('plan_id', $id)
                     ->update(['features_enabled' => $featuresJson]);
+            }
+
+            if (in_array($table, ['stores', 'staff_accounts', 'licenses', 'subscriptions', 'plans', 'system_settings', 'admin_roles'], true)) {
+                \App\Support\AccessCache::clearStoreLicense();
+                \App\Support\AccessCache::clearUserAccess();
+                \Illuminate\Support\Facades\Cache::flush();
             }
             
             return response()->json($record);
@@ -363,6 +395,12 @@ class DynamicApiController extends Controller
                         ->where('plan_id', $planId)
                         ->update(['features_enabled' => $featuresJson]);
                 }
+            }
+
+            if (in_array($table, ['stores', 'staff_accounts', 'licenses', 'subscriptions', 'plans', 'system_settings', 'admin_roles'], true)) {
+                \App\Support\AccessCache::clearStoreLicense();
+                \App\Support\AccessCache::clearUserAccess();
+                \Illuminate\Support\Facades\Cache::flush();
             }
             
             return response()->json(['success' => true]);

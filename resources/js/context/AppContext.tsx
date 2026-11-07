@@ -4,6 +4,7 @@ import { api as apiClient } from '@/api';
 import type { User as SupabaseUser, Session } from '@/api';
 import type { Store, Item, Customer, Supplier, Expense, Sale, SaleItem, CustomerDebt, CashSession, CashMovement, Payment, Return, StockTransfer, CartItem, StaffAccount, Category, Purchase, PurchaseItem } from '@/types';
 import { getDeviceId } from '@/lib/device';
+import { calculateLicenseDaysLeft, getEffectiveLicenseStatus } from '@/lib/license';
 
 export function getCsrfToken(): string {
   if (typeof document === 'undefined') return '';
@@ -50,6 +51,7 @@ interface LicenseInfo {
   max_devices?: number;
   max_stores?: number;
   days_remaining?: number;
+  days_left?: number;
   features?: Record<string, boolean>;
 }
 
@@ -188,24 +190,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [currency]);
 
   // Derived: is the license active and not expired?
+  // Rule: A license MUST be strictly active whenever expiry_date >= now() (days_left >= 0) and status != 'suspended'.
   const isLicenseActive = (() => {
     const ls = state.licenseStatus;
     if (!ls || ls.status === 'none') return true; // No license system = allow (first store / no stores)
-    if (ls.status === 'suspended' || ls.status === 'canceled' || ls.status === 'cancelled' || ls.status === 'expired') {
+    if (String(ls.status).toLowerCase() === 'suspended') {
       return false;
     }
-    if (ls.status !== 'active') return false;
 
-    // A store MUST be allowed full system access and checkout capabilities until the exact expiration timestamp (expires_at > now()).
     if (ls.expiry_date) {
-      const expiryTime = new Date(ls.expiry_date).getTime();
-      if (!isNaN(expiryTime)) {
-        return expiryTime > Date.now();
-      }
+      return calculateLicenseDaysLeft(ls.expiry_date) >= 0;
     }
 
-    if (ls.days_remaining !== undefined && ls.days_remaining <= 0) return false;
-    return true;
+    const days = ls.days_remaining ?? ls.days_left;
+    if (days !== undefined) {
+      return days >= 0;
+    }
+
+    return getEffectiveLicenseStatus(ls) === 'active';
   })();
 
   // Load all data for a store (including licenseStatus & storeFeatures in a single RPC call)
