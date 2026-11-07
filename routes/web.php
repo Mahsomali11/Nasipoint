@@ -66,8 +66,8 @@ Route::middleware('guest')->group(function () {
 // Admin Logout
 Route::post('/admin/logout', [\App\Http\Controllers\WebAuthController::class, 'adminLogout'])->name('admin.logout');
 
-// All /admin/* pages — protected by AdminMiddleware
-Route::prefix('admin')->middleware(['auth', 'admin'])->group(function () {
+// All /admin/* pages — protected by AdminMiddleware + strict super_admin role check
+Route::prefix('admin')->middleware(['auth', 'admin', 'role:super_admin'])->group(function () {
     Route::get('/dashboard', fn() => Inertia::render('admin/AdminDashboardPage'))->name('admin.dashboard');
     Route::get('/stores', fn() => Inertia::render('admin/AdminStoresPage'));
     Route::get('/licenses', fn() => Inertia::render('admin/AdminLicensesPage'));
@@ -83,10 +83,10 @@ Route::prefix('admin')->middleware(['auth', 'admin'])->group(function () {
 });
 
 // ============================================================
-// NORMAL USER ROUTES — Requires auth, blocks admin users
+// NORMAL USER ROUTES — Requires auth, blocks platform admin users, enforces store_user/owner/admin/cashier roles
 // ============================================================
 
-Route::middleware(['auth', 'block_admin'])->group(function () {
+Route::middleware(['auth', 'block_admin', 'role:store_user,owner,admin,cashier,inventory_manager'])->group(function () {
     Route::get('/dashboard', fn() => Inertia::render('DashboardPage'))->name('dashboard');
     Route::get('/start-sale', fn() => Inertia::render('StartSalePage'));
     Route::get('/customer-display', fn() => Inertia::render('CustomerDisplayPage'));

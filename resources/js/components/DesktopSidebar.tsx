@@ -59,9 +59,20 @@ export default function DesktopSidebar({ isMobile = false }: { isMobile?: boolea
   const [inventoryOpen, setInventoryOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   
-  const displayUser = admin || user;
-  const role = admin ? admin.admin_role : (user?.role || 'owner');
-  const isAdmin = isAdminAuthenticated;
+  const cleanPathname = location.pathname.split('?')[0];
+  const isAdminRoute = cleanPathname.startsWith('/admin');
+  const hasStoreContext = Boolean(currentStore?.id || user?.assigned_store_id || (stores && stores.length > 0));
+  const isPlatformSuperAdmin = Boolean(
+    isAdminAuthenticated &&
+    admin?.admin_role &&
+    !user?.assigned_store_id &&
+    !hasStoreContext
+  );
+  // Strictly render the Super Admin Portal sidebar ONLY on /admin/* routes for authenticated Platform Super Admins.
+  // Store Admins (e.g. role === 'admin' assigned to a store like "Haleel") ALWAYS render the Store Client Sidebar.
+  const isAdmin = isAdminRoute && isPlatformSuperAdmin;
+  const displayUser = isAdmin ? admin : user;
+  const role = isAdmin ? (admin?.admin_role || 'super_admin') : (user?.role || 'owner');
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -239,11 +250,13 @@ export default function DesktopSidebar({ isMobile = false }: { isMobile?: boolea
                     </button>
                   ))}
                 </div>
-                <div className="border-t border-border p-2 bg-muted/30">
-                  <button onClick={() => { setStoreDropdownOpen(false); navigate('/create-store'); }} className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-sm font-bold bg-card border border-border hover:bg-muted transition-colors text-foreground shadow-sm">
-                    <Plus size={16} /> <span>Add New Store</span>
-                  </button>
-                </div>
+                {role === 'owner' && (
+                  <div className="border-t border-border p-2 bg-muted/30">
+                    <button onClick={() => { setStoreDropdownOpen(false); navigate('/create-store'); }} className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-sm font-bold bg-card border border-border hover:bg-muted transition-colors text-foreground shadow-sm">
+                      <Plus size={16} /> <span>Add New Store</span>
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>

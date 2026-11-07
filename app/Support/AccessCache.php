@@ -115,15 +115,20 @@ class AccessCache
                 $stores = [];
             }
 
+            // A user assigned to a tenant store (Store Owner, Store Admin, Cashier, Inventory Manager)
+            // is strictly a Tenant Store User and can NEVER be treated as a Platform Super Admin.
+            $isTenantStoreUser = $isAnyOwner || !empty($staffRolesByStore);
+            $isPlatformAdmin = ($adminRoleRow !== null) && !$isTenantStoreUser;
+
             return [
-                'is_admin' => $adminRoleRow !== null,
-                'admin_role' => $adminRoleRow?->role ?? null,
+                'is_admin' => $isPlatformAdmin,
+                'admin_role' => $isPlatformAdmin ? ($adminRoleRow?->role ?? null) : null,
                 'is_any_owner' => $isAnyOwner,
                 'owned_store_ids' => $ownedStoreIds,
                 'staff_roles_by_store' => $staffRolesByStore,
-                'role' => $role,
-                'assigned_store_id' => $assignedStoreId,
-                'stores' => $stores,
+                'role' => $isPlatformAdmin ? 'super_admin' : $role,
+                'assigned_store_id' => $isPlatformAdmin ? null : $assignedStoreId,
+                'stores' => $isPlatformAdmin ? [] : $stores,
             ];
         });
 

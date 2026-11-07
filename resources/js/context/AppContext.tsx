@@ -246,6 +246,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const loadUserData = useCallback(async (userId: string, session: Session) => {
     try {
       const user = session.user as any;
+
+      // Do not populate tenant Store context if the logged-in user is a Platform Super Admin
+      if ((user.is_platform_admin || user.admin_role || user.role === 'super_admin') && !user.assigned_store_id) {
+        setState(prev => ({
+          ...prev,
+          session: null,
+          profile: null,
+          currentStore: null,
+          stores: [],
+          isAuthenticated: false,
+          loading: false,
+        }));
+        return;
+      }
+
       const profile = {
         id: user.id,
         email: user.email,
@@ -253,7 +268,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         name: user.name || '',
       };
 
-      const role = user.role || 'owner';
+      const role = user.store_role || user.role || 'owner';
       const assignedStoreId = user.assigned_store_id;
 
       let storeList: Store[] = [];
@@ -271,8 +286,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
         storeList = (storesResponse.data || []) as unknown as Store[];
       }
 
+      // If user is assigned to a specific store (e.g. Store Admin or Cashier for "Haleel"), strictly scope them to their assigned store
+      if (assignedStoreId && role !== 'owner') {
+        const assignedOnly = storeList.filter(s => s.id === assignedStoreId);
+        if (assignedOnly.length > 0) {
+          storeList = assignedOnly;
+        }
+      }
+
       const savedStoreId = localStorage.getItem('currentStoreId');
-      const currentStore = storeList.find(s => s.id === savedStoreId) || storeList[0] || null;
+      const currentStore = (assignedStoreId ? storeList.find(s => s.id === assignedStoreId) : null)
+        || storeList.find(s => s.id === savedStoreId)
+        || storeList[0]
+        || null;
+
+      if (currentStore?.id) {
+        localStorage.setItem('currentStoreId', currentStore.id);
+      }
 
       setState(prev => ({
         ...prev,

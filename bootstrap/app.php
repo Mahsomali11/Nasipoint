@@ -26,14 +26,29 @@ $app = Application::configure(basePath: dirname(__DIR__))
             \App\Http\Middleware\HandleInertiaRequests::class,
         ]);
 
-        $middleware->redirectUsersTo('/dashboard');
+        $middleware->redirectUsersTo(function (\Illuminate\Http\Request $request) {
+            $user = $request->user();
+            if ($user) {
+                $access = \App\Support\AccessCache::getUserAccess($user);
+                if (!empty($access['is_admin'])) {
+                    return '/admin/dashboard';
+                }
+            }
+            return '/dashboard';
+        });
 
-        $middleware->redirectGuestsTo('/login');
+        $middleware->redirectGuestsTo(function (\Illuminate\Http\Request $request) {
+            if ($request->is('admin') || $request->is('admin/*')) {
+                return '/admin/login';
+            }
+            return '/login';
+        });
 
         // Named middleware aliases
         $middleware->alias([
             'admin' => \App\Http\Middleware\AdminMiddleware::class,
             'block_admin' => \App\Http\Middleware\BlockAdminMiddleware::class,
+            'role' => \App\Http\Middleware\RoleMiddleware::class,
             'prevent_duplicates' => \App\Http\Middleware\PreventDuplicateSubmissions::class,
         ]);
     })

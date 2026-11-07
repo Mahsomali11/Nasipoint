@@ -31,15 +31,21 @@ class AdminMiddleware
         $isAdmin = $access['is_admin'];
 
         if (!$isAdmin) {
-            Auth::logout();
-            $request->session()->invalidate();
-            $request->session()->regenerateToken();
-
             if ($request->expectsJson()) {
                 return response()->json([
                     'message' => 'Access denied. You are not a platform administrator.',
                 ], 403);
             }
+
+            // If the authenticated user is a Store Owner, Store Admin, Cashier, or Inventory Manager,
+            // strictly redirect them back to their Store Client Portal instead of the Admin Panel.
+            if (!empty($access['is_any_owner']) || !empty($access['staff_roles_by_store']) || !empty($access['assigned_store_id'])) {
+                return redirect('/dashboard');
+            }
+
+            Auth::logout();
+            $request->session()->invalidate();
+            $request->session()->regenerateToken();
 
             return redirect()->route('admin.login')
                 ->withErrors(['email' => 'Access denied. You are not a platform administrator.']);

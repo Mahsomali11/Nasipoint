@@ -28,15 +28,11 @@ class WebAuthController extends Controller
         if (Auth::attempt($credentials)) {
             $request->session()->regenerate();
 
-            $userId = Auth::id();
+            $user = Auth::user();
+            $access = $user ? \App\Support\AccessCache::getUserAccess($user) : ['is_admin' => false];
 
-            // Block admin users from the regular login
-            $isAdmin = DB::table('admin_roles')
-                ->where('user_id', $userId)
-                ->where('is_active', true)
-                ->exists();
-
-            if ($isAdmin) {
+            // Block platform super admin users from the regular store login
+            if (!empty($access['is_admin'])) {
                 Auth::logout();
                 $request->session()->invalidate();
                 $request->session()->regenerateToken();
@@ -76,15 +72,11 @@ class WebAuthController extends Controller
         ]);
 
         if (Auth::attempt($credentials)) {
-            $userId = Auth::id();
+            $user = Auth::user();
+            $access = $user ? \App\Support\AccessCache::getUserAccess($user) : ['is_admin' => false];
 
-            // Verify admin role
-            $adminRow = DB::table('admin_roles')
-                ->where('user_id', $userId)
-                ->where('is_active', true)
-                ->first();
-
-            if (!$adminRow) {
+            // Strictly verify Platform Super Admin role (reject Store Admins, Store Owners, and Cashiers)
+            if (empty($access['is_admin'])) {
                 Auth::logout();
                 $request->session()->invalidate();
                 $request->session()->regenerateToken();

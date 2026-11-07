@@ -33,15 +33,18 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::get('/user', function (Request $request) {
         $user = $request->user();
         $access = \App\Support\AccessCache::getUserAccess($user);
-        $role = $access['is_admin'] ? 'admin' : ($access['role'] ?? 'staff');
+        $isPlatformAdmin = !empty($access['is_admin']);
+        $role = $isPlatformAdmin ? 'super_admin' : ($access['role'] ?? 'staff');
 
         return array_merge($user->only(['id', 'name', 'full_name', 'email', 'phone', 'created_at']), [
             'role'              => $role,
-            'admin_role'        => $access['admin_role'],
-            'assigned_store_id' => $access['assigned_store_id'],
+            'store_role'        => $isPlatformAdmin ? null : ($access['role'] ?? null),
+            'admin_role'        => $isPlatformAdmin ? $access['admin_role'] : null,
+            'is_platform_admin' => $isPlatformAdmin,
+            'assigned_store_id' => $isPlatformAdmin ? null : $access['assigned_store_id'],
             'email'             => $user->email,
             'full_name'         => $user->full_name ?? $user->name,
-            'stores'            => $access['stores'] ?? [],
+            'stores'            => $isPlatformAdmin ? [] : ($access['stores'] ?? []),
         ]);
     });
 
@@ -160,6 +163,12 @@ Route::middleware(['auth:sanctum'])->group(function () {
         });
 
         Route::post('/system-branding', function (Request $request) {
+            $user = $request->user();
+            $access = $user ? \App\Support\AccessCache::getUserAccess($user) : ['is_admin' => false];
+            if (empty($access['is_admin'])) {
+                return response()->json(['error' => 'Forbidden: Only Platform Super Admins can modify system branding.'], 403);
+            }
+
             $descriptions = [
                 'platform_name' => 'Official system name displayed across headers, sidebars, and titles',
                 'system_logo' => 'System logo URL displayed on the sidebar and header',

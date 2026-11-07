@@ -166,6 +166,14 @@ class DynamicApiController extends Controller
 
     public function store(Request $request, $table)
     {
+        if (in_array($table, ['licenses', 'plans', 'admin_roles', 'system_settings', 'license_extension_logs'], true)) {
+            $user = $request->user() ?? auth()->user();
+            $access = $user ? \App\Support\AccessCache::getUserAccess($user) : ['is_admin' => false];
+            if (empty($access['is_admin'])) {
+                return response()->json(['error' => 'Forbidden: Only Platform Super Admins can modify platform administration resources.'], 403);
+            }
+        }
+
         $class = $this->getModelClass($table);
 
         // Use only JSON body data, or fallback to POST
@@ -316,6 +324,14 @@ class DynamicApiController extends Controller
 
     public function update(Request $request, $table, $id = null)
     {
+        if (in_array($table, ['licenses', 'plans', 'admin_roles', 'system_settings', 'license_extension_logs'], true)) {
+            $user = $request->user() ?? auth()->user();
+            $access = $user ? \App\Support\AccessCache::getUserAccess($user) : ['is_admin' => false];
+            if (empty($access['is_admin'])) {
+                return response()->json(['error' => 'Forbidden: Only Platform Super Admins can modify platform administration resources.'], 403);
+            }
+        }
+
         $class = $this->getModelClass($table);
 
         if ($table === 'expenses') {

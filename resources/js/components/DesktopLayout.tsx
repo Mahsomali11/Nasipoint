@@ -14,7 +14,7 @@ interface DesktopLayoutProps {
 }
 
 export default function DesktopLayout({ children }: DesktopLayoutProps) {
-  const { licenseStatus, storeFeatures, isLicenseActive } = useApp();
+  const { licenseStatus, storeFeatures, isLicenseActive, user } = useApp();
   const { url } = usePage();
   const { hasFeature } = useFeatureAccess();
   const { systemName, systemLogo } = useSystemBranding();
@@ -23,12 +23,19 @@ export default function DesktopLayout({ children }: DesktopLayoutProps) {
     : (licenseStatus?.days_remaining ?? licenseStatus?.days_left ?? 999);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
-  // Check feature access
+  // Enforce strict portal separation & feature access
   useEffect(() => {
+    const path = url.split('?')[0];
+
+    // Never allow a tenant store user (Store Owner, Store Admin, Cashier, Inventory Manager) on /admin/* routes
+    if (path.startsWith('/admin') && user && ! (user as any).admin_role && (user as any).role !== 'super_admin') {
+      router.visit('/dashboard');
+      return;
+    }
+
     // Check if we are fully loaded
     if (!licenseStatus) return;
 
-    const path = url.split('?')[0];
     const requiredFeature = ROUTE_FEATURE_MAP[path];
     
     if (requiredFeature) {
@@ -39,7 +46,7 @@ export default function DesktopLayout({ children }: DesktopLayoutProps) {
         router.visit('/upgrade');
       }
     }
-  }, [url, licenseStatus, storeFeatures, isLicenseActive, hasFeature]);
+  }, [url, user, licenseStatus, storeFeatures, isLicenseActive, hasFeature]);
 
   // Close mobile menu when url changes
   useEffect(() => {

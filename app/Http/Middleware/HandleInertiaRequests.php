@@ -41,15 +41,18 @@ class HandleInertiaRequests extends Middleware
 
         if ($user) {
             $access = \App\Support\AccessCache::getUserAccess($user);
+            $isPlatformAdmin = !empty($access['is_admin']);
             $userPayload = array_merge(
                 $user->only(['id', 'name', 'full_name', 'email', 'phone', 'created_at']),
                 [
-                    'role' => $access['role'],
-                    'admin_role' => $access['admin_role'],
-                    'assigned_store_id' => $access['assigned_store_id'],
+                    'role' => $isPlatformAdmin ? 'super_admin' : ($access['role'] ?? 'staff'),
+                    'store_role' => $isPlatformAdmin ? null : ($access['role'] ?? null),
+                    'admin_role' => $isPlatformAdmin ? $access['admin_role'] : null,
+                    'is_platform_admin' => $isPlatformAdmin,
+                    'assigned_store_id' => $isPlatformAdmin ? null : $access['assigned_store_id'],
                 ]
             );
-            $storesPayload = $access['stores'] ?? [];
+            $storesPayload = $isPlatformAdmin ? [] : ($access['stores'] ?? []);
         }
 
         $systemBranding = \App\Support\AccessCache::getSystemBranding();
