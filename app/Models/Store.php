@@ -15,7 +15,50 @@ class Store extends Model
         'is_active' => 'boolean',
     ];
 
-    //
+    protected static function booted(): void
+    {
+        static::creating(function (Store $store) {
+            $code = trim((string) ($store->store_code ?? ''));
+            if ($code === '' || static::where('store_code', $code)->exists()) {
+                $store->store_code = static::generateUniqueStoreCode();
+            }
+        });
+
+        static::saving(function (Store $store) {
+            $code = trim((string) ($store->store_code ?? ''));
+            if ($code === '') {
+                $store->store_code = static::generateUniqueStoreCode($store->id);
+            }
+        });
+
+        static::saved(function (Store $store) {
+            if (!empty($store->owner_user_id)) {
+                \App\Support\AccessCache::clearUserAccess((string) $store->owner_user_id);
+            }
+        });
+
+        static::deleted(function (Store $store) {
+            if (!empty($store->owner_user_id)) {
+                \App\Support\AccessCache::clearUserAccess((string) $store->owner_user_id);
+            }
+        });
+    }
+
+    /**
+     * Generate a unique 5-digit System Store ID (10000 - 99999).
+     */
+    public static function generateUniqueStoreCode(?string $ignoreId = null): string
+    {
+        do {
+            $code = (string) random_int(10000, 99999);
+            $query = static::where('store_code', $code);
+            if ($ignoreId) {
+                $query->where('id', '!=', $ignoreId);
+            }
+        } while ($query->exists());
+
+        return $code;
+    }
 
     public function profiles() { return $this->belongsTo(User::class, 'owner_user_id'); }
 }

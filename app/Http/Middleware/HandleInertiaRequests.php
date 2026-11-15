@@ -38,10 +38,17 @@ class HandleInertiaRequests extends Middleware
         $user = $request->user();
         $userPayload = null;
         $storesPayload = [];
+        $canCreateStore = false;
+        $maxStores = 1;
+        $ownedStoresCount = 0;
 
         if ($user) {
             $access = \App\Support\AccessCache::getUserAccess($user);
             $isPlatformAdmin = !empty($access['is_admin']);
+            $canCreateStore = (bool) ($access['can_create_store'] ?? false);
+            $maxStores = (int) ($access['max_stores'] ?? 1);
+            $ownedStoresCount = (int) ($access['owned_stores_count'] ?? 0);
+
             $userPayload = array_merge(
                 $user->only(['id', 'name', 'full_name', 'email', 'phone', 'created_at']),
                 [
@@ -50,6 +57,9 @@ class HandleInertiaRequests extends Middleware
                     'admin_role' => $isPlatformAdmin ? $access['admin_role'] : null,
                     'is_platform_admin' => $isPlatformAdmin,
                     'assigned_store_id' => $isPlatformAdmin ? null : $access['assigned_store_id'],
+                    'can_create_store' => $canCreateStore,
+                    'max_stores' => $maxStores,
+                    'owned_stores_count' => $ownedStoresCount,
                 ]
             );
             $storesPayload = $isPlatformAdmin ? [] : ($access['stores'] ?? []);
@@ -62,6 +72,9 @@ class HandleInertiaRequests extends Middleware
             'auth' => [
                 'user' => $userPayload,
                 'stores' => $storesPayload,
+                'can_create_store' => $canCreateStore,
+                'max_stores' => $maxStores,
+                'owned_stores_count' => $ownedStoresCount,
             ],
             'systemBranding' => $systemBranding,
             'flash' => [

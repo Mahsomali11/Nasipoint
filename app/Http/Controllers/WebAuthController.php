@@ -155,6 +155,7 @@ class WebAuthController extends Controller
         $store = \App\Models\Store::create([
             'owner_user_id' => $user->id,
             'store_name' => $request->storeName,
+            'store_code' => \App\Models\Store::generateUniqueStoreCode(),
             'phone' => $request->storePhone ?? '',
             'location' => $request->storeLocation ?? '',
             'currency' => $request->currency ?? 'KSh',

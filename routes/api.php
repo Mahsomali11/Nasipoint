@@ -37,14 +37,45 @@ Route::middleware(['auth:sanctum'])->group(function () {
         $role = $isPlatformAdmin ? 'super_admin' : ($access['role'] ?? 'staff');
 
         return array_merge($user->only(['id', 'name', 'full_name', 'email', 'phone', 'created_at']), [
-            'role'              => $role,
-            'store_role'        => $isPlatformAdmin ? null : ($access['role'] ?? null),
-            'admin_role'        => $isPlatformAdmin ? $access['admin_role'] : null,
-            'is_platform_admin' => $isPlatformAdmin,
-            'assigned_store_id' => $isPlatformAdmin ? null : $access['assigned_store_id'],
-            'email'             => $user->email,
-            'full_name'         => $user->full_name ?? $user->name,
-            'stores'            => $isPlatformAdmin ? [] : ($access['stores'] ?? []),
+            'role'               => $role,
+            'store_role'         => $isPlatformAdmin ? null : ($access['role'] ?? null),
+            'admin_role'         => $isPlatformAdmin ? $access['admin_role'] : null,
+            'is_platform_admin'  => $isPlatformAdmin,
+            'assigned_store_id'  => $isPlatformAdmin ? null : $access['assigned_store_id'],
+            'can_create_store'   => (bool) ($access['can_create_store'] ?? false),
+            'max_stores'         => (int) ($access['max_stores'] ?? 1),
+            'owned_stores_count' => (int) ($access['owned_stores_count'] ?? 0),
+            'email'              => $user->email,
+            'full_name'          => $user->full_name ?? $user->name,
+            'stores'             => $isPlatformAdmin ? [] : ($access['stores'] ?? []),
+        ]);
+    });
+
+    // Check store creation quota against active subscription/license plan
+    Route::post('/rest/v1/rpc/check_store_creation_allowed', function (Request $request) {
+        $user = $request->user();
+        if (!$user) {
+            return response()->json(['allowed' => false, 'reason' => 'Unauthenticated.'], 401);
+        }
+
+        $targetUserId = (string) ($request->input('_user_id') ?? $user->id);
+        $access = \App\Support\AccessCache::getUserAccess($user);
+        $isPlatformAdmin = !empty($access['is_admin']);
+        $isStaffOnly = !$isPlatformAdmin && empty($access['is_any_owner']) && !empty($access['staff_roles_by_store']);
+
+        $quota = \App\Support\AccessCache::evaluateUserStoreQuota(
+            $targetUserId,
+            null,
+            $isPlatformAdmin && $targetUserId === (string) $user->id,
+            $isStaffOnly
+        );
+
+        return response()->json([
+            'allowed' => $quota['can_create_store'],
+            'can_create_store' => $quota['can_create_store'],
+            'max_stores' => $quota['max_stores'],
+            'owned_stores_count' => $quota['owned_stores_count'],
+            'reason' => $quota['reason'],
         ]);
     });
 

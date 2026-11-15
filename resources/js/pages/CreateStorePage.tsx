@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { router } from '@inertiajs/react';
+import { router, usePage } from '@inertiajs/react';
 import { useApp } from '@/context/AppContext';
 import { api as apiClient } from '@/api';
 import PageHeader from '@/components/PageHeader';
@@ -15,8 +15,20 @@ export default function CreateStorePage() {
   const [currency, setCurrency] = useState('KES');
   const [currencies, setCurrencies] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
-  const [blocked, setBlocked] = useState<string | null>(null);
-  const { addStore, user } = useApp();
+  const { addStore, user, stores, licenseStatus } = useApp();
+  const { props } = usePage();
+  const authProps = (props as any)?.auth;
+
+  const maxStores = Number(licenseStatus?.max_stores ?? authProps?.max_stores ?? (user as any)?.max_stores ?? 1);
+  const ownedStoresCount = stores.length > 0 ? stores.length : Number(authProps?.owned_stores_count ?? 0);
+  const initialBlocked =
+    ownedStoresCount > 0 && (maxStores <= 1 || ownedStoresCount >= maxStores || authProps?.can_create_store === false)
+      ? (maxStores <= 1
+          ? 'Your current subscription plan only allows 1 store. Please upgrade your plan to create multiple stores.'
+          : `You have reached the maximum limit of ${maxStores} stores allowed on your current plan.`)
+      : null;
+
+  const [blocked, setBlocked] = useState<string | null>(initialBlocked);
   const navigate = (url: string, options?: any) => router.visit(url, options);
 
   useEffect(() => {
@@ -33,11 +45,13 @@ export default function CreateStorePage() {
       if (!error && data && typeof data === 'object') {
         const result = data as any;
         if (!result.allowed) {
-          setBlocked(result.reason);
+          setBlocked(result.reason || 'Store limit reached for your current subscription plan.');
+        } else {
+          setBlocked(null);
         }
       }
     })();
-  }, [user?.id]);
+  }, [user?.id, stores.length]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

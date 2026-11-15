@@ -48,9 +48,10 @@ const bottomNav = [
 
 export default function DesktopSidebar({ isMobile = false }: { isMobile?: boolean }) {
   const navigate = (url: string, options?: any) => router.visit(url, options);
-  const { url } = usePage(); 
+  const { url, props } = usePage(); 
+  const authProps = (props as any)?.auth;
   const location = { pathname: url };
-  const { currentStore, stores, setCurrentStore, user, logout, isLicenseActive } = useApp();
+  const { currentStore, stores, setCurrentStore, user, logout, isLicenseActive, licenseStatus } = useApp();
   const { admin, isAdminAuthenticated, logout: adminLogout } = useAdmin();
   const { hasFeature } = useFeatureAccess();
   const { systemName, systemLogo } = useSystemBranding();
@@ -73,6 +74,21 @@ export default function DesktopSidebar({ isMobile = false }: { isMobile?: boolea
   const isAdmin = isAdminRoute && isPlatformSuperAdmin;
   const displayUser = isAdmin ? admin : user;
   const role = isAdmin ? (admin?.admin_role || 'super_admin') : (user?.role || 'owner');
+
+  // Evaluate whether the user's active subscription plan permits creating additional stores
+  const maxStores = Number(
+    licenseStatus?.max_stores ??
+    authProps?.max_stores ??
+    (user as any)?.max_stores ??
+    1
+  );
+  const ownedStoresCount = stores.length > 0
+    ? stores.length
+    : Number(authProps?.owned_stores_count ?? (user as any)?.owned_stores_count ?? 0);
+  const canCreateStore =
+    role === 'owner' &&
+    ownedStoresCount < maxStores &&
+    (ownedStoresCount === 0 || (maxStores > 1 && Boolean(authProps?.can_create_store ?? (user as any)?.can_create_store ?? true)));
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -250,7 +266,7 @@ export default function DesktopSidebar({ isMobile = false }: { isMobile?: boolea
                     </button>
                   ))}
                 </div>
-                {role === 'owner' && (
+                {canCreateStore && (
                   <div className="border-t border-border p-2 bg-muted/30">
                     <button onClick={() => { setStoreDropdownOpen(false); navigate('/create-store'); }} className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-sm font-bold bg-card border border-border hover:bg-muted transition-colors text-foreground shadow-sm">
                       <Plus size={16} /> <span>Add New Store</span>

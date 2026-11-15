@@ -181,6 +181,38 @@ class DynamicApiController extends Controller
         if (empty($body)) {
             $body = $request->post();
         }
+
+        // Strict backend store creation quota enforcement against active subscription/license plan
+        if ($table === 'stores') {
+            $user = $request->user() ?? auth()->user();
+            if (!$user) {
+                return response()->json(['error' => 'Unauthenticated.'], 401);
+            }
+
+            $targetOwnerId = !empty($body['owner_user_id']) ? (string) $body['owner_user_id'] : (string) $user->id;
+            $access = \App\Support\AccessCache::getUserAccess($user);
+            $isPlatformAdmin = !empty($access['is_admin']);
+
+            if (!$isPlatformAdmin && $targetOwnerId !== (string) $user->id) {
+                return response()->json(['error' => 'Forbidden: You can only create stores for your own account.'], 403);
+            }
+
+            $isStaffOnly = !$isPlatformAdmin && empty($access['is_any_owner']) && !empty($access['staff_roles_by_store']);
+            $quota = \App\Support\AccessCache::evaluateUserStoreQuota(
+                $targetOwnerId,
+                null,
+                $isPlatformAdmin && $targetOwnerId === (string) $user->id,
+                $isStaffOnly
+            );
+
+            if (!$quota['can_create_store']) {
+                $reason = $quota['reason'] ?? 'You have reached the maximum number of stores allowed by your subscription plan.';
+                return response()->json([
+                    'error' => $reason,
+                    'message' => $reason,
+                ], 403);
+            }
+        }
         
         if (in_array($table, ['stores', 'staff_accounts', 'licenses', 'plans', 'system_settings', 'admin_roles'], true)) {
             \Illuminate\Support\Facades\Cache::flush();

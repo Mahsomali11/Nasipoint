@@ -1,13 +1,30 @@
 import { useState } from 'react';
-import { router } from '@inertiajs/react';
+import { router, usePage } from '@inertiajs/react';
 import { useApp } from '@/context/AppContext';
 import { Store, Plus, Trash2, MapPin, ArrowRight, Building2, Store as StoreIcon } from 'lucide-react';
 import { toast } from 'sonner';
 
 export default function SelectStorePage() {
-  const { stores, setCurrentStore, deleteStore, user } = useApp();
+  const { stores, setCurrentStore, deleteStore, user, licenseStatus } = useApp();
+  const { props } = usePage();
+  const authProps = (props as any)?.auth;
   const navigate = (url: string, options?: any) => router.visit(url, options);
   const [deleting, setDeleting] = useState<string | null>(null);
+
+  const role = user?.role || 'owner';
+  const maxStores = Number(
+    licenseStatus?.max_stores ??
+    authProps?.max_stores ??
+    (user as any)?.max_stores ??
+    1
+  );
+  const ownedStoresCount = stores.length > 0
+    ? stores.length
+    : Number(authProps?.owned_stores_count ?? (user as any)?.owned_stores_count ?? 0);
+  const canCreateStore =
+    role === 'owner' &&
+    ownedStoresCount < maxStores &&
+    (ownedStoresCount === 0 || (maxStores > 1 && Boolean(authProps?.can_create_store ?? (user as any)?.can_create_store ?? true)));
 
   const handleSelect = (store: typeof stores[0]) => {
     setCurrentStore(store);
@@ -97,16 +114,18 @@ export default function SelectStorePage() {
             </div>
           ))}
           
-          <button 
-            onClick={() => navigate('/create-store')}
-            className="w-full h-full min-h-[220px] bg-muted/10 rounded-3xl border-2 border-dashed border-border p-6 flex flex-col items-center justify-center text-center hover:bg-primary/5 hover:border-primary/30 focus:outline-none focus:ring-4 focus:ring-primary/10 transition-all group shadow-sm"
-          >
-            <div className="w-14 h-14 rounded-full bg-background border border-border flex items-center justify-center mb-4 text-muted-foreground group-hover:text-primary group-hover:scale-110 group-hover:border-primary/30 transition-all shadow-sm">
-              <Plus size={24} />
-            </div>
-            <h3 className="text-lg font-bold text-foreground mb-1 group-hover:text-primary transition-colors capitalize">Add New Store</h3>
-            <p className="text-xs font-medium text-muted-foreground">Create another workspace</p>
-          </button>
+          {canCreateStore && (
+            <button 
+              onClick={() => navigate('/create-store')}
+              className="w-full h-full min-h-[220px] bg-muted/10 rounded-3xl border-2 border-dashed border-border p-6 flex flex-col items-center justify-center text-center hover:bg-primary/5 hover:border-primary/30 focus:outline-none focus:ring-4 focus:ring-primary/10 transition-all group shadow-sm"
+            >
+              <div className="w-14 h-14 rounded-full bg-background border border-border flex items-center justify-center mb-4 text-muted-foreground group-hover:text-primary group-hover:scale-110 group-hover:border-primary/30 transition-all shadow-sm">
+                <Plus size={24} />
+              </div>
+              <h3 className="text-lg font-bold text-foreground mb-1 group-hover:text-primary transition-colors capitalize">Add New Store</h3>
+              <p className="text-xs font-medium text-muted-foreground">Create another workspace</p>
+            </button>
+          )}
         </div>
       </div>
     </div>

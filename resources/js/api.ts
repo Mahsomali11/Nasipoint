@@ -253,13 +253,17 @@ class LaravelAuthMock {
         const rawPage = appEl?.dataset?.page || document.querySelector('script[data-page="app"]')?.textContent;
         if (rawPage) {
           const parsed = JSON.parse(rawPage);
-          const inertiaUser = parsed?.props?.auth?.user;
-          const inertiaStores = parsed?.props?.auth?.stores;
+          const inertiaAuth = parsed?.props?.auth;
+          const inertiaUser = inertiaAuth?.user;
+          const inertiaStores = inertiaAuth?.stores;
           if (inertiaUser && inertiaUser.id) {
             const user = {
               ...inertiaUser,
               full_name: inertiaUser.full_name || inertiaUser.name || '',
               stores: Array.isArray(inertiaStores) ? inertiaStores : inertiaUser.stores,
+              can_create_store: inertiaAuth?.can_create_store ?? inertiaUser.can_create_store,
+              max_stores: inertiaAuth?.max_stores ?? inertiaUser.max_stores,
+              owned_stores_count: inertiaAuth?.owned_stores_count ?? inertiaUser.owned_stores_count,
             };
             const session: Session = { access_token: 'session', user };
             return { data: { session }, error: null };
@@ -363,7 +367,19 @@ export const api = {
   rpc: async (fn: string, params: any) => {
       // Mock RPC calls
       if (fn === 'check_store_creation_allowed') {
-         return { data: { allowed: true } };
+         try {
+           const res = await fetch(`${API_URL}/rest/v1/rpc/check_store_creation_allowed`, {
+             method: 'POST',
+             headers: getHeaders(),
+             credentials: 'same-origin',
+             body: JSON.stringify(params || {})
+           });
+           if (res.ok) {
+             const data = await res.json();
+             return { data, error: null };
+           }
+         } catch (e) {}
+         return { data: { allowed: false, reason: 'Unable to verify store creation quota.' }, error: null };
       }
       if (fn === 'inherit_owner_license') {
          return { data: { inherited: true } };
