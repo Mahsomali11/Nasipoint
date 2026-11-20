@@ -317,6 +317,192 @@ class WebAuthController extends Controller
     }
 
     // ================================================================
+    // EMAIL OTP VERIFICATION FOR REGISTRATION
+    // ================================================================
+    public function sendSignupOtp(Request $request)
+    {
+        $request->merge(['email' => strtolower(trim((string) $request->input('email', '')))]);
+
+        $validator = \Illuminate\Support\Facades\Validator::make(
+            $request->all(),
+            [
+                'fullName' => ['required', 'string', 'max:255'],
+                'email' => self::strictEmailRules(true),
+                'password' => ['required', 'string', 'min:6'],
+            ],
+            [
+                'fullName.required' => 'Full name is required.',
+                'email.required' => 'Email address is required.',
+                'email.email' => 'Please enter a valid email address with a working domain.',
+                'email.unique' => 'This email address is already registered.',
+                'password.required' => 'Password is required.',
+                'password.min' => 'Password must be at least 6 characters.',
+            ]
+        );
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => $validator->errors()->first(),
+                'errors' => $validator->errors(),
+            ], 422);
+        }
+
+        $email = $request->email;
+        $fullName = trim((string) $request->input('fullName', ''));
+        $cacheKey = "signup_otp_{$email}";
+
+        $existing = \Illuminate\Support\Facades\Cache::get($cacheKey);
+        if (is_array($existing) && isset($existing['sent_at'])) {
+            $elapsed = now()->getTimestamp() - (int) $existing['sent_at'];
+            if ($elapsed < 30 && $request->boolean('is_resend')) {
+                $wait = 30 - $elapsed;
+                return response()->json([
+                    'success' => false,
+                    'message' => "Please wait {$wait} seconds before requesting another code.",
+                ], 429);
+            }
+        }
+
+        $otp = (string) random_int(100000, 999999);
+        $expiresAt = now()->addMinutes(10);
+
+        \Illuminate\Support\Facades\Cache::put($cacheKey, [
+            'otp_hash' => Hash::make($otp),
+            'expires_at' => $expiresAt->getTimestamp(),
+            'sent_at' => now()->getTimestamp(),
+            'attempts' => 0,
+        ], $expiresAt);
+
+        \Illuminate\Support\Facades\Cache::forget("signup_otp_verified_{$email}");
+        if ($request->hasSession()) {
+            $request->session()->forget("signup_email_verified_{$email}");
+        }
+
+        try {
+            \Illuminate\Support\Facades\Mail::to($email)->send(
+                new \App\Mail\RegistrationOtpMail($otp, $fullName)
+            );
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error("Failed to send signup OTP email to {$email}: " . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Unable to send verification email at this time. Please check your email address and try again.',
+            ], 500);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => "A 6-digit verification code has been sent to {$email}.",
+            'expires_in_seconds' => 600,
+        ]);
+    }
+
+    public function verifySignupOtp(Request $request)
+    {
+        $email = strtolower(trim((string) $request->input('email', '')));
+        $otp = preg_replace('/\D/', '', (string) $request->input('otp', ''));
+
+        if ($email === '' || strlen($otp) !== 6) {
+            return response()->json([
+                'valid' => false,
+                'message' => 'Please enter a valid 6-digit verification code.',
+            ], 422);
+        }
+
+        $cacheKey = "signup_otp_{$email}";
+        $cached = \Illuminate\Support\Facades\Cache::get($cacheKey);
+
+        if (!is_array($cached) || empty($cached['otp_hash']) || now()->getTimestamp() > (int) ($cached['expires_at'] ?? 0)) {
+            \Illuminate\Support\Facades\Cache::forget($cacheKey);
+            return response()->json([
+                'valid' => false,
+                'message' => 'This verification code has expired or does not exist. Please click "Resend Code" to get a new code.',
+            ], 422);
+        }
+
+        $attempts = (int) ($cached['attempts'] ?? 0);
+        if ($attempts >= 5) {
+            \Illuminate\Support\Facades\Cache::forget($cacheKey);
+            return response()->json([
+                'valid' => false,
+                'message' => 'Too many incorrect attempts. Please click "Resend Code" to generate a new verification code.',
+            ], 422);
+        }
+
+        if (!Hash::check($otp, (string) $cached['otp_hash'])) {
+            $cached['attempts'] = $attempts + 1;
+            $remainingTtl = max(60, (int) $cached['expires_at'] - now()->getTimestamp());
+            \Illuminate\Support\Facades\Cache::put($cacheKey, $cached, now()->addSeconds($remainingTtl));
+
+            return response()->json([
+                'valid' => false,
+                'message' => 'Invalid verification code. Please check the 6-digit code sent to your email and try again.',
+            ], 422);
+        }
+
+        // OTP is valid: invalidate the one-time code and record verified state
+        \Illuminate\Support\Facades\Cache::forget($cacheKey);
+        $verificationToken = Str::random(48);
+        \Illuminate\Support\Facades\Cache::put("signup_otp_verified_{$email}", $verificationToken, now()->addMinutes(30));
+
+        if ($request->hasSession()) {
+            $request->session()->put("signup_email_verified_{$email}", true);
+        }
+
+        return response()->json([
+            'valid' => true,
+            'verification_token' => $verificationToken,
+            'message' => 'Email verified successfully.',
+        ]);
+    }
+
+    /**
+     * Check and consume the verified OTP state for an email before finalizing user creation.
+     */
+    public static function verifyAndConsumeEmailOtp(Request $request, string $email): ?string
+    {
+        $email = strtolower(trim($email));
+        $verifiedKey = "signup_otp_verified_{$email}";
+        $cachedToken = \Illuminate\Support\Facades\Cache::get($verifiedKey);
+        $submittedToken = (string) ($request->input('verificationToken') ?? $request->input('verification_token') ?? '');
+        $sessionVerified = $request->hasSession() && $request->session()->get("signup_email_verified_{$email}") === true;
+
+        $isVerified = false;
+        if ($sessionVerified) {
+            $isVerified = true;
+        } elseif (!empty($cachedToken) && ($submittedToken === '' || hash_equals((string) $cachedToken, $submittedToken))) {
+            $isVerified = true;
+        } else {
+            // Also allow direct OTP verification if `otp` was submitted with the final signup request
+            $rawOtp = preg_replace('/\D/', '', (string) $request->input('otp', ''));
+            if (strlen($rawOtp) === 6) {
+                $otpData = \Illuminate\Support\Facades\Cache::get("signup_otp_{$email}");
+                if (
+                    is_array($otpData) &&
+                    !empty($otpData['otp_hash']) &&
+                    now()->getTimestamp() <= (int) ($otpData['expires_at'] ?? 0) &&
+                    Hash::check($rawOtp, (string) $otpData['otp_hash'])
+                ) {
+                    $isVerified = true;
+                }
+            }
+        }
+
+        if (!$isVerified) {
+            return 'Please verify your email address with the 6-digit verification code before creating your account.';
+        }
+
+        \Illuminate\Support\Facades\Cache::forget("signup_otp_{$email}");
+        \Illuminate\Support\Facades\Cache::forget($verifiedKey);
+        if ($request->hasSession()) {
+            $request->session()->forget("signup_email_verified_{$email}");
+        }
+
+        return null;
+    }
+
+    // ================================================================
     // SIGNUP — /signup
     // ================================================================
     public function signup(Request $request)
@@ -332,6 +518,10 @@ class WebAuthController extends Controller
             'email.unique' => 'This email address is already registered.',
         ]);
 
+        if ($otpError = self::verifyAndConsumeEmailOtp($request, $request->email)) {
+            return back()->withErrors(['email' => $otpError])->onlyInput('email');
+        }
+
         $data = $request->all();
         $options = $data['options']['data'] ?? [];
 
@@ -341,6 +531,7 @@ class WebAuthController extends Controller
             'name' => $options['full_name'] ?? '',
             'full_name' => $options['full_name'] ?? '',
             'phone' => $options['phone'] ?? '',
+            'email_verified_at' => now(),
         ]);
 
         $request->session()->forget('password_hash_web');
@@ -368,12 +559,17 @@ class WebAuthController extends Controller
             'email.unique' => 'This email address is already registered.',
         ]);
 
+        if ($otpError = self::verifyAndConsumeEmailOtp($request, $request->email)) {
+            return back()->withErrors(['email' => $otpError])->onlyInput('email');
+        }
+
         $user = User::create([
             'email' => $request->email,
             'password' => Hash::make($request->password),
             'name' => $request->fullName ?? '',
             'full_name' => $request->fullName ?? '',
             'phone' => $request->phone ?? '',
+            'email_verified_at' => now(),
         ]);
 
         $store = \App\Models\Store::create([

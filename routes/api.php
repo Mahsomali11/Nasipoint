@@ -48,6 +48,10 @@ Route::post('/validate-email', function (Request $request) {
     return response()->json(['valid' => true]);
 });
 
+// Registration 6-digit email OTP verification endpoints
+Route::post('/signup-otp/send', [\App\Http\Controllers\WebAuthController::class, 'sendSignupOtp']);
+Route::post('/signup-otp/verify', [\App\Http\Controllers\WebAuthController::class, 'verifySignupOtp']);
+
 // ============================================================
 // AUTHENTICATED USER API ROUTES
 // ============================================================

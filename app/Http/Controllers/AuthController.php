@@ -69,6 +69,10 @@ class AuthController extends Controller
             'email.unique' => 'This email address is already registered.',
         ]);
 
+        if ($otpError = WebAuthController::verifyAndConsumeEmailOtp($request, $request->email)) {
+            return response()->json(['message' => $otpError, 'error' => $otpError], 422);
+        }
+
         $data = $request->all();
         $options = $data['options']['data'] ?? [];
 
@@ -78,6 +82,7 @@ class AuthController extends Controller
             'name' => $options['full_name'] ?? '',
             'full_name' => $options['full_name'] ?? '',
             'phone' => $options['phone'] ?? '',
+            'email_verified_at' => now(),
         ]);
 
         $token = $user->createToken('auth_token')->plainTextToken;
@@ -106,12 +111,17 @@ class AuthController extends Controller
             'email.unique' => 'This email address is already registered.',
         ]);
 
+        if ($otpError = WebAuthController::verifyAndConsumeEmailOtp($request, $request->email)) {
+            return response()->json(['message' => $otpError, 'error' => $otpError], 422);
+        }
+
         $user = User::create([
             'email' => $request->email,
             'password' => Hash::make($request->password),
             'name' => $request->fullName ?? '',
             'full_name' => $request->fullName ?? '',
             'phone' => $request->phone ?? '',
+            'email_verified_at' => now(),
         ]);
 
         $store = \App\Models\Store::create([

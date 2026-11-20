@@ -37,6 +37,8 @@ Route::middleware('guest')->group(function () {
 
     Route::post('/signup', [\App\Http\Controllers\WebAuthController::class, 'signup']);
     Route::post('/signup-with-store', [\App\Http\Controllers\WebAuthController::class, 'signupWithStore']);
+    Route::post('/signup-otp/send', [\App\Http\Controllers\WebAuthController::class, 'sendSignupOtp']);
+    Route::post('/signup-otp/verify', [\App\Http\Controllers\WebAuthController::class, 'verifySignupOtp']);
 
     // Other public pages
     Route::post('/forgot-password', [\App\Http\Controllers\WebAuthController::class, 'forgotPassword']);
