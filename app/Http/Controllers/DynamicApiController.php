@@ -218,6 +218,87 @@ class DynamicApiController extends Controller
             \Illuminate\Support\Facades\Cache::flush();
         }
 
+        // Strict email validation when creating staff_accounts, profiles, or users
+        if (in_array($table, ['staff_accounts', 'profiles', 'users'], true) && isset($body['email'])) {
+            $email = strtolower(trim((string) $body['email']));
+            $body['email'] = $email;
+            $validator = \Illuminate\Support\Facades\Validator::make(
+                ['email' => $email],
+                ['email' => WebAuthController::strictEmailRules(false)]
+            );
+            if ($validator->fails()) {
+                $msg = $validator->errors()->first('email') ?: 'Please enter a valid email address (e.g. name@example.com).';
+                return response()->json(['error' => $msg, 'message' => $msg], 422);
+            }
+        }
+
+        // Normalize and validate items payload (single or bulk) so missing store_id or empty optional fields never crash
+        if ($table === 'items') {
+            $user = $request->user() ?? auth()->user();
+            $fallbackStoreId = $request->input('store_id');
+            if ((!$fallbackStoreId || trim((string) $fallbackStoreId) === '') && $user) {
+                $access = \App\Support\AccessCache::getUserAccess($user);
+                $fallbackStoreId = $access['assigned_store_id'] ?? ($access['owned_store_ids'][0] ?? null);
+                if (!$fallbackStoreId) {
+                    $fallbackStoreId = \App\Models\Store::where('owner_user_id', $user->id)->value('id')
+                        ?? \App\Models\StaffAccount::where('user_id', $user->id)->where('is_active', true)->value('store_id');
+                }
+            }
+
+            $normalizeItemRow = function (array $row, int $offset = 0) use ($fallbackStoreId): array {
+                $storeId = trim((string) ($row['store_id'] ?? $fallbackStoreId ?? ''));
+                $name = trim((string) ($row['name'] ?? ''));
+                $type = in_array($row['type'] ?? '', ['product', 'service'], true) ? $row['type'] : 'product';
+                $subCatId = !empty($row['sub_category_id']) && trim((string) $row['sub_category_id']) !== ''
+                    ? trim((string) $row['sub_category_id'])
+                    : null;
+                $itemCode = trim((string) ($row['item_code'] ?? ''));
+                if ($itemCode === '' && $storeId !== '') {
+                    $count = \App\Models\Item::where('store_id', $storeId)->count() + 1 + $offset;
+                    $itemCode = '#' . str_pad((string) $count, 3, '0', STR_PAD_LEFT);
+                }
+
+                $row['store_id'] = $storeId;
+                $row['name'] = $name;
+                $row['item_code'] = $itemCode;
+                $row['type'] = $type;
+                $row['category'] = trim((string) ($row['category'] ?? ''));
+                $row['sub_category_id'] = $subCatId;
+                $row['barcode'] = trim((string) ($row['barcode'] ?? ''));
+                $row['cost_price'] = is_numeric($row['cost_price'] ?? null) ? max(0, (float) $row['cost_price']) : 0;
+                $row['sell_price'] = is_numeric($row['sell_price'] ?? null) ? max(0, (float) $row['sell_price']) : 0;
+                $row['quantity'] = $type === 'service' ? 0 : (is_numeric($row['quantity'] ?? null) ? (int) round((float) $row['quantity']) : 0);
+                $row['low_stock_threshold'] = is_numeric($row['low_stock_threshold'] ?? null) ? max(0, (int) round((float) $row['low_stock_threshold'])) : 5;
+                $row['is_active'] = isset($row['is_active']) ? (bool) $row['is_active'] : true;
+                if (array_key_exists('image_path', $row)) {
+                    $row['image_path'] = (string) ($row['image_path'] ?? '');
+                }
+
+                return $row;
+            };
+
+            if (is_array($body) && isset($body[0]) && is_array($body[0])) {
+                foreach ($body as $idx => $itemRow) {
+                    $normalized = $normalizeItemRow($itemRow, $idx);
+                    if ($normalized['store_id'] === '') {
+                        return response()->json(['error' => 'Active store context is required to add items.', 'message' => 'Active store context is required to add items.'], 422);
+                    }
+                    if ($normalized['name'] === '') {
+                        return response()->json(['error' => 'Item name is required.', 'message' => 'Item name is required.'], 422);
+                    }
+                    $body[$idx] = $normalized;
+                }
+            } elseif (is_array($body)) {
+                $body = $normalizeItemRow($body, 0);
+                if ($body['store_id'] === '') {
+                    return response()->json(['error' => 'Active store context is required to add an item.', 'message' => 'Active store context is required to add an item.'], 422);
+                }
+                if ($body['name'] === '') {
+                    return response()->json(['error' => 'Item name is required.', 'message' => 'Item name is required.'], 422);
+                }
+            }
+        }
+
         if (is_array($body) && isset($body[0]) && is_array($body[0])) {
             // Check for rapid duplicate bulk insert (e.g. sale_items for the same sale)
             if ($table === 'sale_items' && isset($body[0]['sale_id'])) {
@@ -401,6 +482,39 @@ class DynamicApiController extends Controller
         $body = $request->json()->all();
         if (empty($body)) {
             $body = $request->post();
+        }
+
+        // Strict email validation when updating staff_accounts, profiles, or users
+        if (in_array($table, ['staff_accounts', 'profiles', 'users'], true) && isset($body['email'])) {
+            $email = strtolower(trim((string) $body['email']));
+            $body['email'] = $email;
+            $validator = \Illuminate\Support\Facades\Validator::make(
+                ['email' => $email],
+                ['email' => WebAuthController::strictEmailRules(false)]
+            );
+            if ($validator->fails()) {
+                $msg = $validator->errors()->first('email') ?: 'Please enter a valid email address (e.g. name@example.com).';
+                return response()->json(['error' => $msg, 'message' => $msg], 422);
+            }
+        }
+
+        // Normalize item fields on update
+        if ($table === 'items' && is_array($body)) {
+            if (array_key_exists('sub_category_id', $body) && empty($body['sub_category_id'])) {
+                $body['sub_category_id'] = null;
+            }
+            if (isset($body['cost_price'])) {
+                $body['cost_price'] = is_numeric($body['cost_price']) ? max(0, (float) $body['cost_price']) : 0;
+            }
+            if (isset($body['sell_price'])) {
+                $body['sell_price'] = is_numeric($body['sell_price']) ? max(0, (float) $body['sell_price']) : 0;
+            }
+            if (isset($body['quantity'])) {
+                $body['quantity'] = is_numeric($body['quantity']) ? (int) round((float) $body['quantity']) : 0;
+            }
+            if (isset($body['low_stock_threshold'])) {
+                $body['low_stock_threshold'] = is_numeric($body['low_stock_threshold']) ? max(0, (int) round((float) $body['low_stock_threshold'])) : 5;
+            }
         }
 
         // Requirement: When extending a license (or setting an expiry_date >= today), automatically activate status

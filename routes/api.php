@@ -23,6 +23,31 @@ Route::get('/system-branding', function () {
     return response()->json(\App\Support\AccessCache::getSystemBranding());
 });
 
+// Public endpoint to validate email format, domain MX deliverability, and uniqueness during registration
+Route::post('/validate-email', function (Request $request) {
+    $email = strtolower(trim((string) $request->input('email', '')));
+    $checkUnique = (bool) $request->input('check_unique', true);
+
+    $validator = \Illuminate\Support\Facades\Validator::make(
+        ['email' => $email],
+        ['email' => \App\Http\Controllers\WebAuthController::strictEmailRules($checkUnique)],
+        [
+            'email.required' => 'Email address is required.',
+            'email.email' => 'Please enter a valid email address with a working domain.',
+            'email.unique' => 'This email address is already registered.',
+        ]
+    );
+
+    if ($validator->fails()) {
+        return response()->json([
+            'valid' => false,
+            'message' => $validator->errors()->first('email') ?: 'Please enter a valid email address with a working domain.',
+        ], 422);
+    }
+
+    return response()->json(['valid' => true]);
+});
+
 // ============================================================
 // AUTHENTICATED USER API ROUTES
 // ============================================================

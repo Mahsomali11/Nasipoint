@@ -103,18 +103,43 @@ export default function InventoryPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isSubmitting) return;
+
+    const trimmedName = form.name.trim();
+    if (!trimmedName) {
+      toast.error('Item name is required.');
+      return;
+    }
+
+    const costPrice = form.cost_price === '' ? 0 : Number(form.cost_price);
+    const sellPrice = form.sell_price === '' ? 0 : Number(form.sell_price);
+    const quantity = tab === 'product' ? (form.quantity === '' ? 0 : Number(form.quantity)) : 0;
+    const lowStock = form.low_stock_threshold === '' ? 5 : Number(form.low_stock_threshold);
+
+    if (!Number.isFinite(costPrice) || costPrice < 0) {
+      toast.error('Please enter a valid non-negative Cost Price.');
+      return;
+    }
+    if (!Number.isFinite(sellPrice) || sellPrice < 0) {
+      toast.error('Please enter a valid non-negative Sell Price.');
+      return;
+    }
+    if (tab === 'product' && !Number.isFinite(quantity)) {
+      toast.error('Please enter a valid Initial Quantity.');
+      return;
+    }
+
     setIsSubmitting(true);
     try {
       if (editingItem) {
         await updateItem(editingItem, {
-          name: form.name,
+          name: trimmedName,
           category: form.category.trim(),
           sub_category_id: form.sub_category_id || null,
-          barcode: form.barcode,
-          cost_price: Number(form.cost_price),
-          sell_price: Number(form.sell_price),
-          quantity: tab === 'product' ? Number(form.quantity) : 0,
-          low_stock_threshold: Number(form.low_stock_threshold),
+          barcode: form.barcode.trim(),
+          cost_price: costPrice,
+          sell_price: sellPrice,
+          quantity: tab === 'product' ? Math.round(quantity) : 0,
+          low_stock_threshold: Number.isFinite(lowStock) ? Math.max(0, Math.round(lowStock)) : 5,
           image_path: form.image_path,
         });
         toast.success('Item updated successfully');
@@ -122,16 +147,16 @@ export default function InventoryPage() {
       } else {
         await addItem({
           store_id: currentStore?.id || '',
-          item_code: `#${String(items.length + 1).padStart(3, '0')}`,
-          name: form.name,
+          item_code: `#${String(storeItems.length + 1).padStart(3, '0')}`,
+          name: trimmedName,
           category: form.category.trim(),
           sub_category_id: form.sub_category_id || null,
           type: tab,
-          barcode: form.barcode,
-          cost_price: Number(form.cost_price),
-          sell_price: Number(form.sell_price),
-          quantity: tab === 'product' ? Number(form.quantity) : 0,
-          low_stock_threshold: Number(form.low_stock_threshold),
+          barcode: form.barcode.trim(),
+          cost_price: costPrice,
+          sell_price: sellPrice,
+          quantity: tab === 'product' ? Math.round(quantity) : 0,
+          low_stock_threshold: Number.isFinite(lowStock) ? Math.max(0, Math.round(lowStock)) : 5,
           is_active: true,
           image_path: form.image_path,
         });
@@ -141,7 +166,7 @@ export default function InventoryPage() {
       setShowForm(false);
       setEditingItem(null);
     } catch (err: any) {
-      toast.error(err.message || 'Failed to save item');
+      toast.error(err?.message || 'Failed to save item');
     } finally {
       setIsSubmitting(false);
     }

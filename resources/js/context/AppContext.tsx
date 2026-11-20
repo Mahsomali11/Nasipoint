@@ -469,20 +469,83 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [loadStoreData]);
 
   const addItem = useCallback(async (item: Omit<Item, 'id' | 'created_at'>) => {
-    const { data, error } = await apiClient.from('items').insert(item as any).select().single();
+    const resolvedStoreId =
+      item.store_id ||
+      state.currentStore?.id ||
+      state.stores[0]?.id ||
+      (state.session?.user as any)?.assigned_store_id ||
+      (state.session?.user as any)?.stores?.[0]?.id ||
+      localStorage.getItem('currentStoreId') ||
+      '';
+
+    if (!resolvedStoreId) {
+      throw new Error('No active store context found. Please refresh the page and try again.');
+    }
+
+    const trimmedName = (item.name || '').trim();
+    if (!trimmedName) {
+      throw new Error('Item name is required.');
+    }
+
+    const itemType = item.type === 'service' ? 'service' : 'product';
+    const sanitizedPayload = {
+      ...item,
+      store_id: resolvedStoreId,
+      name: trimmedName,
+      type: itemType,
+      category: (item.category || '').trim(),
+      sub_category_id: item.sub_category_id ? String(item.sub_category_id).trim() || null : null,
+      barcode: (item.barcode || '').trim(),
+      item_code: (item.item_code || '').trim() || `#${String(state.items.length + 1).padStart(3, '0')}`,
+      cost_price: Number.isFinite(Number(item.cost_price)) ? Math.max(0, Number(item.cost_price)) : 0,
+      sell_price: Number.isFinite(Number(item.sell_price)) ? Math.max(0, Number(item.sell_price)) : 0,
+      quantity: itemType === 'service' ? 0 : (Number.isFinite(Number(item.quantity)) ? Math.round(Number(item.quantity)) : 0),
+      low_stock_threshold: Number.isFinite(Number(item.low_stock_threshold)) ? Math.max(0, Math.round(Number(item.low_stock_threshold))) : 5,
+      is_active: item.is_active ?? true,
+      image_path: item.image_path || '',
+    };
+
+    const { data, error } = await apiClient.from('items').insert(sanitizedPayload as any).select().single();
     if (error) throw new Error(error.message || 'Failed to add item');
     if (data) {
       setState(prev => ({ ...prev, items: [...prev.items, data as unknown as Item] }));
     }
-  }, []);
+  }, [state.currentStore, state.stores, state.session, state.items.length]);
 
   const addItemsBulk = useCallback(async (newItems: Omit<Item, 'id' | 'created_at'>[]) => {
-    const { data, error } = await apiClient.from('items').insert(newItems as any).select();
+    const resolvedStoreId =
+      state.currentStore?.id ||
+      state.stores[0]?.id ||
+      (state.session?.user as any)?.assigned_store_id ||
+      (state.session?.user as any)?.stores?.[0]?.id ||
+      localStorage.getItem('currentStoreId') ||
+      '';
+
+    const sanitizedItems = newItems.map((item, idx) => {
+      const itemType = item.type === 'service' ? 'service' : 'product';
+      return {
+        ...item,
+        store_id: item.store_id || resolvedStoreId,
+        name: (item.name || '').trim(),
+        type: itemType,
+        category: (item.category || '').trim(),
+        sub_category_id: item.sub_category_id ? String(item.sub_category_id).trim() || null : null,
+        barcode: (item.barcode || '').trim(),
+        item_code: (item.item_code || '').trim() || `#${String(state.items.length + idx + 1).padStart(3, '0')}`,
+        cost_price: Number.isFinite(Number(item.cost_price)) ? Math.max(0, Number(item.cost_price)) : 0,
+        sell_price: Number.isFinite(Number(item.sell_price)) ? Math.max(0, Number(item.sell_price)) : 0,
+        quantity: itemType === 'service' ? 0 : (Number.isFinite(Number(item.quantity)) ? Math.round(Number(item.quantity)) : 0),
+        low_stock_threshold: Number.isFinite(Number(item.low_stock_threshold)) ? Math.max(0, Math.round(Number(item.low_stock_threshold))) : 5,
+        is_active: item.is_active ?? true,
+      };
+    });
+
+    const { data, error } = await apiClient.from('items').insert(sanitizedItems as any).select();
     if (error) throw new Error(error.message || 'Failed to add items bulk');
     if (data && Array.isArray(data)) {
       setState(prev => ({ ...prev, items: [...prev.items, ...(data as unknown as Item[])] }));
     }
-  }, []);
+  }, [state.currentStore, state.stores, state.session, state.items.length]);
 
 
   const updateItem = useCallback(async (id: string, updates: Partial<Item>) => {

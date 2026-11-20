@@ -58,9 +58,15 @@ class AuthController extends Controller
 
     public function signup(Request $request)
     {
+        $request->merge(['email' => strtolower(trim((string) $request->input('email', '')))]);
+
         $request->validate([
-            'email' => 'required|email|unique:users',
+            'email' => WebAuthController::strictEmailRules(true),
             'password' => 'required|min:6',
+        ], [
+            'email.required' => 'Email address is required.',
+            'email.email' => 'Please enter a valid email address (e.g. name@example.com).',
+            'email.unique' => 'This email address is already registered.',
         ]);
 
         $data = $request->all();
@@ -88,10 +94,16 @@ class AuthController extends Controller
 
     public function signupWithStore(Request $request)
     {
+        $request->merge(['email' => strtolower(trim((string) $request->input('email', '')))]);
+
         $request->validate([
-            'email' => 'required|email|unique:users',
+            'email' => WebAuthController::strictEmailRules(true),
             'password' => 'required|min:6',
-            'storeName' => 'required',
+            'storeName' => 'required|string|max:255',
+        ], [
+            'email.required' => 'Email address is required.',
+            'email.email' => 'Please enter a valid email address (e.g. name@example.com).',
+            'email.unique' => 'This email address is already registered.',
         ]);
 
         $user = User::create([
@@ -132,12 +144,18 @@ class AuthController extends Controller
 
     public function createStaff(Request $request)
     {
+        $request->merge(['email' => strtolower(trim((string) $request->input('email', '')))]);
+
         $request->validate([
-            'email' => 'required|email|unique:users',
+            'email' => WebAuthController::strictEmailRules(true),
             'password' => 'required|min:6',
-            'full_name' => 'required',
+            'full_name' => 'required|string|max:255',
             'store_id' => 'required',
             'role' => 'required',
+        ], [
+            'email.required' => 'Email address is required.',
+            'email.email' => 'Please enter a valid email address (e.g. name@example.com).',
+            'email.unique' => 'This email address is already registered.',
         ]);
 
         return \Illuminate\Support\Facades\DB::transaction(function () use ($request) {

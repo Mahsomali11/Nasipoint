@@ -160,17 +160,43 @@ class QueryBuilder {
           extraHeaders['X-Idempotency-Key'] = generateIdempotencyKey(requestKey);
         }
 
-        const res = await fetch(url, {
+        let res = await fetch(url, {
           method,
           credentials: 'same-origin',
           headers: getHeaders(extraHeaders),
           body: this.payload ? JSON.stringify(this.payload) : undefined
         });
 
+        // If a CSRF token mismatch (419) occurs after session regeneration, refresh XSRF cookie once and retry
+        if (res.status === 419 && isMutating) {
+          try {
+            await fetch(`${API_URL}/system-branding`, {
+              method: 'GET',
+              credentials: 'same-origin',
+              headers: { Accept: 'application/json' },
+            });
+            res = await fetch(url, {
+              method,
+              credentials: 'same-origin',
+              headers: getHeaders(extraHeaders),
+              body: this.payload ? JSON.stringify(this.payload) : undefined
+            });
+          } catch (_) {}
+        }
+
         if (res.status === 401 || res.status === 419) {
-          // Force a reload to trigger Inertia redirect to login if session expires
-          window.location.reload();
-          return { data: null, error: new Error('Session expired') };
+          // Do not forcefully reload/kick out during a mutating form submission; return a clear error instead
+          if (!isMutating) {
+            window.location.reload();
+          }
+          return {
+            data: null,
+            error: new Error(
+              res.status === 419
+                ? 'Your session security token expired. Please refresh the page and try again.'
+                : 'Your session expired. Please refresh the page or sign in again.'
+            ),
+          };
         }
 
         if (!res.ok) {

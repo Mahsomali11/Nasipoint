@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { router } from '@inertiajs/react';
 import { useApp } from '@/context/AppContext';
 import { toast } from 'sonner';
+import { getEmailValidationError, verifyEmailDeliverability } from '@/lib/email';
 import { Progress } from '@/components/ui/progress';
 import { Sparkles, Package, Users, UserPlus, CreditCard, Rocket, Plus, Trash2 } from 'lucide-react';
 
@@ -122,18 +123,33 @@ export default function SetupWizardPage() {
 
   const saveStaff = async () => {
     if (!currentStore || !staff.name.trim()) { setStep(5); return; }
+    const emailError = getEmailValidationError(staff.email);
+    if (emailError) {
+      toast.error(emailError);
+      return;
+    }
     setSaving(true);
-    await addStaffAccount({
-      store_id: currentStore.id,
-      full_name: staff.name,
-      email: staff.email,
-      phone: '',
-      role: staff.role as any,
-      is_active: true,
-    });
-    toast.success('Staff member added!');
-    setSaving(false);
-    setStep(5);
+    try {
+      const serverEmailError = await verifyEmailDeliverability(staff.email, true);
+      if (serverEmailError) {
+        toast.error(serverEmailError);
+        return;
+      }
+      await addStaffAccount({
+        store_id: currentStore.id,
+        full_name: staff.name.trim(),
+        email: staff.email.trim(),
+        phone: '',
+        role: staff.role as any,
+        is_active: true,
+      });
+      toast.success('Staff member added!');
+      setStep(5);
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to add staff member');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const finishSetup = () => {

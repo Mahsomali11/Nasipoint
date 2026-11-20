@@ -4,12 +4,15 @@ import { Progress } from '@/components/ui/progress';
 import PhoneInput, { COUNTRY_CODES, useGeoCountry, getInternationalPhone, type CountryCode } from '@/components/PhoneInput';
 import { useForm, Head, Link } from '@inertiajs/react';
 import { toast } from 'sonner';
+import { getEmailValidationError, verifyEmailDeliverability } from '@/lib/email';
 
 const CURRENCIES = ['KSh', 'USD', 'EUR', 'GBP', 'TZS', 'UGX', 'ETB', 'SSP', 'RWF', 'BIF'];
 
 export default function SignupPage() {
   const [step, setStep] = useState(1);
   const totalSteps = 2;
+  const [step1Error, setStep1Error] = useState('');
+  const [validatingEmail, setValidatingEmail] = useState(false);
 
   const { data, setData, post, processing, errors, clearErrors } = useForm({
     fullName: '',
@@ -36,17 +39,52 @@ export default function SignupPage() {
 
   const validateStep1 = () => {
     clearErrors();
-    let valid = true;
-    if (!data.fullName.trim()) { setData('fullName', data.fullName); valid = false; }
-    if (!data.email.trim()) { valid = false; }
-    if (data.password.length < 6) { valid = false; }
-    if (data.password !== data.confirmPassword) { valid = false; }
-    return valid;
+    setStep1Error('');
+
+    if (!data.fullName.trim()) {
+      const msg = 'Full name is required.';
+      setStep1Error(msg);
+      toast.error(msg);
+      return false;
+    }
+
+    const emailErr = getEmailValidationError(data.email);
+    if (emailErr) {
+      setStep1Error(emailErr);
+      toast.error(emailErr);
+      return false;
+    }
+
+    if (data.password.length < 6) {
+      const msg = 'Password must be at least 6 characters.';
+      setStep1Error(msg);
+      toast.error(msg);
+      return false;
+    }
+
+    if (data.password !== data.confirmPassword) {
+      const msg = 'Passwords do not match.';
+      setStep1Error(msg);
+      toast.error(msg);
+      return false;
+    }
+
+    return true;
   };
 
   const validateStep2 = () => {
     clearErrors();
-    if (!data.storeName.trim()) return false;
+    const emailErr = getEmailValidationError(data.email);
+    if (emailErr) {
+      setStep1Error(emailErr);
+      setStep(1);
+      toast.error(emailErr);
+      return false;
+    }
+    if (!data.storeName.trim()) {
+      toast.error('Store name is required.');
+      return false;
+    }
     if (data.storePhone && data.storePhone.length !== selectedCountry.phoneLength) {
       setPhoneError(`Phone number must contain exactly ${selectedCountry.phoneLength} digits for ${selectedCountry.country}.`);
       return false;
@@ -55,12 +93,27 @@ export default function SignupPage() {
     return true;
   };
 
-  const handleNext = () => {
-    if (step === 1 && validateStep1()) setStep(2);
+  const handleNext = async () => {
+    if (step !== 1 || validatingEmail) return;
+    if (!validateStep1()) return;
+
+    setValidatingEmail(true);
+    try {
+      const serverEmailErr = await verifyEmailDeliverability(data.email, true);
+      if (serverEmailErr) {
+        setStep1Error(serverEmailErr);
+        toast.error(serverEmailErr);
+        return;
+      }
+      setStep(2);
+    } finally {
+      setValidatingEmail(false);
+    }
   };
 
   const handleBack = () => {
     clearErrors();
+    setStep1Error('');
     setPhoneError('');
     setStep(1);
   };
@@ -77,6 +130,16 @@ export default function SignupPage() {
     post('/signup-with-store', {
         onSuccess: () => {
             toast.success('Account created! Your store is ready.');
+        },
+        onError: (errs) => {
+            if (errs.email || errs.password || errs.fullName) {
+                const msg = errs.email || errs.password || errs.fullName;
+                setStep1Error(msg);
+                setStep(1);
+                toast.error(msg);
+            } else if (errs.storeName) {
+                toast.error(errs.storeName);
+            }
         }
     });
   };
@@ -110,9 +173,9 @@ export default function SignupPage() {
           {step === 1 && (
             <div className="animate-in fade-in slide-in-from-right-4 duration-300">
               <div className="space-y-5">
-                {errors.email && (
+                {(errors.email || step1Error) && (
                   <div className="bg-destructive/10 border border-destructive/20 text-destructive text-sm p-3 rounded-md">
-                    {errors.email}
+                    {errors.email || step1Error}
                   </div>
                 )}
                 
@@ -168,9 +231,10 @@ export default function SignupPage() {
                 <button 
                   type="button" 
                   onClick={handleNext}
-                  className="w-full h-11 flex items-center justify-center gap-2 rounded-md bg-primary text-primary-foreground text-sm font-bold shadow-sm hover:opacity-90 transition-opacity mt-6 capitalize"
+                  disabled={validatingEmail}
+                  className="w-full h-11 flex items-center justify-center gap-2 rounded-md bg-primary text-primary-foreground text-sm font-bold shadow-sm hover:opacity-90 transition-opacity mt-6 capitalize disabled:opacity-50"
                 >
-                  Continue <ArrowRight size={16} />
+                  {validatingEmail ? 'Verifying Email...' : 'Continue'} {!validatingEmail && <ArrowRight size={16} />}
                 </button>
               </div>
 

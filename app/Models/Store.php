@@ -37,6 +37,25 @@ class Store extends Model
             }
         });
 
+        static::created(function (Store $store) {
+            try {
+                $hasAccount = \App\Models\PaymentAccount::where('store_id', $store->id)->exists();
+                if (!$hasAccount) {
+                    \App\Models\PaymentAccount::create([
+                        'id' => (string) \Illuminate\Support\Str::uuid(),
+                        'store_id' => $store->id,
+                        'account_name' => 'Cash',
+                        'account_number' => '',
+                        'provider_name' => '',
+                        'account_type' => 'Cash',
+                        'is_active' => true,
+                    ]);
+                }
+            } catch (\Throwable $e) {
+                // Non-fatal if payment_accounts table is unavailable
+            }
+        });
+
         static::deleted(function (Store $store) {
             if (!empty($store->owner_user_id)) {
                 \App\Support\AccessCache::clearUserAccess((string) $store->owner_user_id);

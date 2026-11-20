@@ -32,6 +32,26 @@ class CheckStoreAccess
             $requestedStoreId = $request->query('id') ?? $request->input('id') ?? $request->query('eq.id') ?? $request->input('eq.id');
         }
 
+        // If a store-scoped mutation (POST/PATCH) omits or sends an empty store_id, resolve it from the authenticated user's active store context
+        $table = $request->route('table');
+        $storeScopedTables = [
+            'items', 'categories', 'customers', 'suppliers', 'expenses',
+            'sales', 'purchases', 'returns', 'payment_accounts',
+            'account_transfers', 'customer_debts', 'payments', 'staff_accounts',
+        ];
+        if ((!$requestedStoreId || trim((string) $requestedStoreId) === '') && in_array($table, $storeScopedTables, true) && in_array($request->method(), ['POST', 'PATCH', 'PUT'], true)) {
+            $access = \App\Support\AccessCache::getUserAccess($user);
+            $fallbackStoreId = $access['assigned_store_id'] ?? ($access['owned_store_ids'][0] ?? null);
+            if (!$fallbackStoreId) {
+                $fallbackStoreId = \App\Models\Store::where('owner_user_id', $user->id)->value('id')
+                    ?? \App\Models\StaffAccount::where('user_id', $user->id)->where('is_active', true)->value('store_id');
+            }
+            if ($fallbackStoreId) {
+                $requestedStoreId = (string) $fallbackStoreId;
+                $request->merge(['store_id' => $requestedStoreId]);
+            }
+        }
+
         if (!$requestedStoreId || in_array($request->route('table'), ['profiles'])) {
             // If the endpoint doesn't specify a store_id, we either pass it through or 
             // the endpoint must handle authorization itself. 

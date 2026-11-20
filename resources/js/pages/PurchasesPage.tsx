@@ -99,17 +99,22 @@ export default function PurchasesPage() {
 
   const handleQuickAddProduct = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!currentStore || isSubmittingProduct) return;
+    if (isSubmittingProduct) return;
+    const trimmedName = quickAddName.trim();
+    if (!trimmedName) {
+      toast.error('Product name is required.');
+      return;
+    }
     setIsSubmittingProduct(true);
     
     try {
         const { data, error } = await apiClient.from('items').insert({
-            store_id: currentStore.id,
-            name: quickAddName,
+            store_id: currentStore?.id || '',
+            name: trimmedName,
             type: 'product',
-            category: quickAddCategory || 'General',
+            category: (quickAddCategory || 'General').trim(),
             sub_category_id: quickAddSubCategory || null,
-            barcode: quickAddBarcode,
+            barcode: quickAddBarcode.trim(),
             low_stock_threshold: Number(quickAddLowStock) || 5,
             cost_price: Number(quickAddCostPrice) || 0,
             sell_price: Number(quickAddSellingPrice) || 0,
@@ -119,14 +124,9 @@ export default function PurchasesPage() {
 
         if (error) throw new Error(error.message || 'Failed to add product');
         
-        // Ensure data exists
         const newItem = Array.isArray(data) ? data[0] : data;
         
-        // Add to global items temporarily so dropdown finds it immediately
         if (newItem) {
-           items.push(newItem);
-           
-           // Add to purchase line items
            const newItems = [...purchaseItems];
            newItems.push({
                item_id: newItem.id,
@@ -137,8 +137,8 @@ export default function PurchasesPage() {
            setPurchaseItems(newItems);
         }
 
-        // trigger global data refresh in background
-        if (refreshData) refreshData();
+        if (refreshData) await refreshData();
+        toast.success('Product added successfully');
         
         setShowQuickAddProduct(false);
         setQuickAddName('');
@@ -150,7 +150,7 @@ export default function PurchasesPage() {
         setQuickAddInitialQuantity('');
         setQuickAddLowStock('5');
     } catch (err: any) {
-        alert(err.message || 'Error saving product');
+        toast.error(err?.message || 'Error saving product');
     } finally {
         setIsSubmittingProduct(false);
     }

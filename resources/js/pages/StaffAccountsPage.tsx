@@ -4,6 +4,7 @@ import { useApp } from '@/context/AppContext';
 import { Trash2, UserPlus, X, Pencil, Plus, Search, ShieldAlert, BadgeCheck, LayoutGrid, Eye } from 'lucide-react';
 import StaffActivityDashboard from '@/components/StaffActivityDashboard';
 import { toast } from 'sonner';
+import { getEmailValidationError, verifyEmailDeliverability } from '@/lib/email';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -80,6 +81,16 @@ export default function StaffAccountsPage() {
     e.preventDefault();
     if (!name.trim() || !email.trim()) {
       toast.error('Name and email are required');
+      return;
+    }
+    const emailError = getEmailValidationError(email);
+    if (emailError) {
+      toast.error(emailError);
+      return;
+    }
+    const serverEmailError = await verifyEmailDeliverability(email, !editingId);
+    if (serverEmailError) {
+      toast.error(serverEmailError);
       return;
     }
     try {
